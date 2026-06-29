@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Download, Minus, Plus } from '@element-plus/icons-vue'
+import { Download, Minus, Plus, Picture, ArrowDown } from '@element-plus/icons-vue'
 import { usePreviewRenderer } from '../../composables/usePreviewRenderer'
-import { exportCollageZip } from '../../services/exportService'
+import { exportCollageZip, exportCollageImage, exportCollageImages } from '../../services/exportService'
 import { useCollageStore } from '../../stores/collageStore'
 
 const store = useCollageStore()
@@ -18,11 +18,32 @@ const previewStyle = computed<Record<string, string>>(() => ({
 
 const exportLabel = computed(() => `${dimensions.value.width} x ${dimensions.value.height}`)
 
+/** 导出当前页为单张图片 */
+async function exportCurrentImage(): Promise<void> {
+  if (store.currentGroup.length === 0) return
+  isExporting.value = true
+  const extension = store.settings.exportFormat === 'jpeg' ? 'jpg' : store.settings.exportFormat
+  await exportCollageImage(store.currentGroup, store.settings, `collage_${padPage(store.currentPage)}.${extension}`)
+  isExporting.value = false
+}
+
+/** 导出全部为逐张图片 */
+async function exportAllImages(): Promise<void> {
+  if (store.groups.length === 0) return
+  isExporting.value = true
+  await exportCollageImages(store.groups, store.settings)
+  isExporting.value = false
+}
+
 async function exportZip(): Promise<void> {
   if (store.groups.length === 0) return
   isExporting.value = true
   await exportCollageZip(store.groups, store.settings)
   isExporting.value = false
+}
+
+function padPage(n: number): string {
+  return String(n).padStart(Math.max(String(store.totalPages).length, 3), '0')
 }
 </script>
 
@@ -56,9 +77,20 @@ async function exportZip(): Promise<void> {
           <strong>{{ store.settings.aspectRatio }}</strong>
           <span>{{ exportLabel }}</span>
         </div>
-        <el-button type="primary" :icon="Download" :loading="isExporting" :disabled="store.totalPages === 0" @click="exportZip">
-          导出 ZIP
+        <el-button type="primary" :icon="Picture" :loading="isExporting" :disabled="store.totalPages === 0 || store.currentGroup.length === 0" @click="exportCurrentImage">
+          导出当前页
         </el-button>
+        <el-dropdown trigger="click" :disabled="store.totalPages === 0 || isExporting">
+          <el-button :icon="ArrowDown" :disabled="store.totalPages === 0 || isExporting">
+            更多导出
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item @click="exportAllImages">全部导出(图片)</el-dropdown-item>
+              <el-dropdown-item @click="exportZip">导出 ZIP</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </header>
 

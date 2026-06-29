@@ -756,8 +756,10 @@ input {
   }
 
   .studio-stats {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
     gap: 6px;
   }
 
@@ -765,6 +767,7 @@ input {
     min-width: 0;
     min-height: 34px;
     padding: 4px 6px;
+    flex-shrink: 0;
   }
 
   .stat-pill strong {
@@ -779,6 +782,8 @@ input {
     min-height: 34px;
     padding-inline: 8px;
     font-size: 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .preview-toolbar {
