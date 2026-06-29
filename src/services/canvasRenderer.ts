@@ -1,4 +1,5 @@
 import { getActiveLayout } from './layoutEngine'
+import { ASPECT_RATIOS } from '../constants/collage'
 import type { CollageSettings, FitMode, ImageAsset } from '../types/collage'
 
 interface RenderOptions {
@@ -15,9 +16,10 @@ interface DrawRect {
 }
 
 export async function renderCollageToBlob({ images, settings, size }: RenderOptions): Promise<Blob> {
+  const dimensions = getExportDimensions(settings, size)
   const canvas = document.createElement('canvas')
-  canvas.width = size
-  canvas.height = size
+  canvas.width = dimensions.width
+  canvas.height = dimensions.height
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas is not available.')
 
@@ -26,15 +28,15 @@ export async function renderCollageToBlob({ images, settings, size }: RenderOpti
 
   if (!settings.transparent) {
     ctx.fillStyle = settings.background
-    ctx.fillRect(0, 0, size, size)
+    ctx.fillRect(0, 0, dimensions.width, dimensions.height)
   } else {
-    ctx.clearRect(0, 0, size, size)
+    ctx.clearRect(0, 0, dimensions.width, dimensions.height)
   }
 
   const layout = getActiveLayout(settings)
   const gap = settings.gap
-  const cellWidth = (size - gap * (layout.columns + 1)) / layout.columns
-  const cellHeight = (size - gap * (layout.rows + 1)) / layout.rows
+  const cellWidth = (dimensions.width - gap * (layout.columns + 1)) / layout.columns
+  const cellHeight = (dimensions.height - gap * (layout.rows + 1)) / layout.rows
 
   images.slice(0, layout.rows * layout.columns).forEach((image, index) => {
     const row = Math.floor(index / layout.columns)
@@ -48,12 +50,20 @@ export async function renderCollageToBlob({ images, settings, size }: RenderOpti
     drawCell(ctx, image, rect, settings)
   })
 
-  drawWatermark(ctx, settings, size)
+  drawWatermark(ctx, settings, dimensions.width, dimensions.height)
 
   const type = `image/${settings.exportFormat}`
   return await new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Export failed.'))), type, settings.exportQuality)
   })
+}
+
+export function getExportDimensions(settings: CollageSettings, longEdge = settings.exportSize): { width: number; height: number } {
+  const ratio = ASPECT_RATIOS.find((item) => item.id === settings.aspectRatio) ?? ASPECT_RATIOS[1]
+  const isLandscape = ratio.width >= ratio.height
+  const width = isLandscape ? longEdge : Math.round((longEdge * ratio.width) / ratio.height)
+  const height = isLandscape ? Math.round((longEdge * ratio.height) / ratio.width) : longEdge
+  return { width, height }
 }
 
 function drawCell(ctx: CanvasRenderingContext2D, image: ImageAsset | null, rect: DrawRect, settings: CollageSettings): void {
@@ -133,7 +143,7 @@ function roundedRect(ctx: CanvasRenderingContext2D, rect: DrawRect, radius: numb
   ctx.closePath()
 }
 
-function drawWatermark(ctx: CanvasRenderingContext2D, settings: CollageSettings, size: number): void {
+function drawWatermark(ctx: CanvasRenderingContext2D, settings: CollageSettings, canvasWidth: number, canvasHeight: number): void {
   if (!settings.textWatermarkEnabled || !settings.watermarkText.trim()) return
 
   ctx.save()
@@ -143,8 +153,8 @@ function drawWatermark(ctx: CanvasRenderingContext2D, settings: CollageSettings,
   ctx.textBaseline = 'middle'
 
   if (settings.watermarkPosition === 'tile') {
-    for (let y = settings.watermarkSpacing / 2; y < size; y += settings.watermarkSpacing) {
-      for (let x = settings.watermarkSpacing / 2; x < size; x += settings.watermarkSpacing) {
+    for (let y = settings.watermarkSpacing / 2; y < canvasHeight; y += settings.watermarkSpacing) {
+      for (let x = settings.watermarkSpacing / 2; x < canvasWidth; x += settings.watermarkSpacing) {
         drawTextAt(ctx, settings, x, y)
       }
     }
@@ -153,13 +163,13 @@ function drawWatermark(ctx: CanvasRenderingContext2D, settings: CollageSettings,
   }
 
   const margin = Math.max(32, settings.watermarkSize)
-  const width = ctx.measureText(settings.watermarkText).width
+  const textWidth = ctx.measureText(settings.watermarkText).width
   const positions = {
     'top-left': [margin, margin],
-    'top-right': [size - margin - width, margin],
-    'bottom-left': [margin, size - margin],
-    'bottom-right': [size - margin - width, size - margin],
-    center: [size / 2 - width / 2, size / 2],
+    'top-right': [canvasWidth - margin - textWidth, margin],
+    'bottom-left': [margin, canvasHeight - margin],
+    'bottom-right': [canvasWidth - margin - textWidth, canvasHeight - margin],
+    center: [canvasWidth / 2 - textWidth / 2, canvasHeight / 2],
   } as const
   const [x, y] = positions[settings.watermarkPosition]
   drawTextAt(ctx, settings, x, y)

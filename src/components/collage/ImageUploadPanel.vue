@@ -18,7 +18,7 @@ async function onDrop(event: DragEvent): Promise<void> {
 </script>
 
 <template>
-  <section class="panel">
+  <section class="panel upload-panel">
     <div class="panel__title">
       <span>上传图片</span>
       <el-button text type="danger" :disabled="store.images.length === 0" @click="store.clearImages">清空</el-button>

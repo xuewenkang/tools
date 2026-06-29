@@ -1,22 +1,32 @@
-import type { CollageSettings, LayoutPreset } from '../types/collage'
+import type { AspectRatioPreset, CollageSettings, LayoutPreset } from '../types/collage'
 
 export const IMAGE_COUNTS = [2, 3, 4, 6, 8, 9, 12, 16]
 
 export const EXPORT_SIZES = [1080, 1440, 2160, 3000, 4000]
 
+export const ASPECT_RATIOS: AspectRatioPreset[] = [
+  { id: 'all', label: 'All', width: 1, height: 1 },
+  { id: '3:4', label: '3:4', width: 3, height: 4 },
+  { id: '1:1', label: '1:1', width: 1, height: 1 },
+  { id: '4:3', label: '4:3', width: 4, height: 3 },
+  { id: '16:9', label: '16:9', width: 16, height: 9 },
+  { id: '9:16', label: 'FULL', width: 9, height: 16 },
+]
+
 export const DEFAULT_SETTINGS: CollageSettings = {
   imagesPerCollage: 4,
   customImagesPerCollage: 5,
+  aspectRatio: '3:4',
   layoutMode: 'auto',
   rows: 2,
   columns: 2,
   remainderMode: 'blank',
   fitMode: 'cover',
-  gap: 16,
-  radius: 18,
-  background: '#f7f7f2',
+  gap: 0,
+  radius: 0,
+  background: '#ffffff',
   transparent: false,
-  shadow: true,
+  shadow: false,
   border: false,
   textWatermarkEnabled: false,
   watermarkText: 'AI ToolBox',

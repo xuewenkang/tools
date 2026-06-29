@@ -2,6 +2,7 @@ export type FitMode = 'cover' | 'contain' | 'stretch' | 'center'
 export type RemainderMode = 'blank' | 'repeat-last' | 'ignore'
 export type WatermarkPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center' | 'tile'
 export type ExportFormat = 'png' | 'jpeg' | 'webp'
+export type AspectRatioId = 'all' | '3:4' | '1:1' | '4:3' | '16:9' | '9:16'
 
 export interface ImageAsset {
   id: string
@@ -20,9 +21,17 @@ export interface LayoutPreset {
   columns: number
 }
 
+export interface AspectRatioPreset {
+  id: AspectRatioId
+  label: string
+  width: number
+  height: number
+}
+
 export interface CollageSettings {
   imagesPerCollage: number
   customImagesPerCollage: number
+  aspectRatio: AspectRatioId
   layoutMode: 'auto' | 'custom'
   rows: number
   columns: number

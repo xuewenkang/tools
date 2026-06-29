@@ -1,11 +1,12 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { renderCollageToBlob } from '../services/canvasRenderer'
+import { getExportDimensions, renderCollageToBlob } from '../services/canvasRenderer'
 import type { CollageSettings, ImageAsset } from '../types/collage'
 
 export function usePreviewRenderer(group: () => Array<ImageAsset | null>, settings: () => CollageSettings) {
   const previewUrl = ref('')
   const isRendering = ref(false)
   const size = computed(() => Math.min(settings().exportSize, 1440))
+  const dimensions = computed(() => getExportDimensions(settings(), size.value))
 
   watch(
     [group, settings],
@@ -31,5 +32,5 @@ export function usePreviewRenderer(group: () => Array<ImageAsset | null>, settin
 
   onBeforeUnmount(revokePreview)
 
-  return { previewUrl, isRendering }
+  return { previewUrl, isRendering, dimensions }
 }
