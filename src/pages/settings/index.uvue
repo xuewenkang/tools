@@ -12,8 +12,11 @@ export default {
     return {
       statusBarHeight: 44,
       navOffset: 148,
+      apiKeyInput: '',
+      hasGeminiKey: false,
       items: [
         { id: 'privacy', label: '本地处理', desc: '图片处理默认在设备本地完成', value: '开启', type: 'info' as SettingItem['type'] },
+        { id: 'ai', label: 'AI 灵感', desc: '默认使用 Gemini Flash Lite 免费层友好模型', value: '可配置', type: 'info' as SettingItem['type'] },
         { id: 'cache', label: '临时缓存', desc: '清理选择图片时产生的临时记录', value: '清理', type: 'action' as SettingItem['type'] },
         { id: 'feedback', label: '意见反馈', desc: '告诉我们你希望增加的图片工具', value: '发送', type: 'action' as SettingItem['type'] },
         { id: 'version', label: '版本', desc: '图片小工具', value: 'v1.0.0', type: 'info' as SettingItem['type'] },
@@ -23,8 +26,31 @@ export default {
   onShow() {
     const sysInfo = uni.getSystemInfoSync()
     this.statusBarHeight = (sysInfo.statusBarHeight as number) ?? 44
+    const key = uni.getStorageSync('geminiApiKey')
+    const text = key == null ? '' : `${key}`
+    this.apiKeyInput = text
+    this.hasGeminiKey = text.trim().length > 0
   },
   methods: {
+    onApiKeyInput(e: any) {
+      this.apiKeyInput = `${e.detail.value}`
+    },
+    saveApiKey() {
+      const key = this.apiKeyInput.trim()
+      if (key.length == 0) {
+        uni.showToast({ title: '请输入 Gemini Key', icon: 'none' })
+        return
+      }
+      uni.setStorageSync('geminiApiKey', key)
+      this.hasGeminiKey = true
+      uni.showToast({ title: '已保存', icon: 'success' })
+    },
+    clearApiKey() {
+      uni.removeStorageSync('geminiApiKey')
+      this.apiKeyInput = ''
+      this.hasGeminiKey = false
+      uni.showToast({ title: '已清除', icon: 'none' })
+    },
     handleSetting(item: SettingItem) {
       if (item.id == 'cache') {
         uni.showToast({ title: '缓存已清理', icon: 'success' })
@@ -51,6 +77,25 @@ export default {
       <view class="summary-card">
         <text class="summary-title">图片小工具</text>
         <text class="summary-desc">一个逐步扩展的本地图片工具箱。</text>
+      </view>
+
+      <view class="key-card">
+        <view class="key-head">
+          <view>
+            <text class="key-title">Google Gemini Key</text>
+            <text class="key-desc">{{ hasGeminiKey ? '已配置 使用 gemini-3.1-flash-lite' : '用于今日灵感的 AI 文案和小故事' }}</text>
+          </view>
+          <button class="key-clear" @click="clearApiKey" v-if="hasGeminiKey">清除</button>
+        </view>
+        <input
+          class="key-input"
+          type="text"
+          password
+          placeholder="粘贴你的 Gemini API Key"
+          :value="apiKeyInput"
+          @input="onApiKeyInput"
+        />
+        <button class="key-save" @click="saveApiKey">保存 Key</button>
       </view>
 
       <view class="setting-group">
@@ -149,6 +194,78 @@ export default {
   overflow: hidden;
   background: #fffdfb;
   border: 1rpx solid rgba(216, 148, 154, 0.12);
+}
+
+.key-card {
+  margin-top: 24rpx;
+  padding: 28rpx;
+  border-radius: 24rpx;
+  background: #fffdfb;
+  border: 1rpx solid rgba(216, 148, 154, 0.16);
+  box-shadow: 0 12rpx 34rpx rgba(186, 116, 126, 0.08);
+}
+
+.key-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.key-head view {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.key-title {
+  font-size: 30rpx;
+  font-weight: 800;
+  color: #34252a;
+}
+
+.key-desc {
+  font-size: 23rpx;
+  color: #9b747b;
+}
+
+.key-clear {
+  width: 96rpx;
+  height: 56rpx;
+  border-radius: 999rpx;
+  background: #fff0ef;
+  color: #b85265;
+  font-size: 23rpx;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.key-input {
+  height: 78rpx;
+  margin-top: 22rpx;
+  padding: 0 22rpx;
+  border-radius: 18rpx;
+  background: #fff8f6;
+  color: #34252a;
+  font-size: 25rpx;
+}
+
+.key-save {
+  height: 76rpx;
+  margin-top: 18rpx;
+  border-radius: 20rpx;
+  background: #d96b7c;
+  color: #ffffff;
+  font-size: 26rpx;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .setting-row {

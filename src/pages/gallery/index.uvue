@@ -1,8 +1,52 @@
 <script lang="uts">
-type IdeaItem = {
+type WeatherMood = {
   title: string
   desc: string
-  tag: string
+  className: string
+}
+
+const moods: WeatherMood[] = [
+  { title: '晴光', desc: '适合把普通的一天整理得亮一点', className: 'sunny' },
+  { title: '云柔', desc: '慢一点也很好 今天先完成一件小事', className: 'cloudy' },
+  { title: '微雨', desc: '把情绪放轻 给自己一点安静时间', className: 'rainy' },
+]
+
+const fallbackLines: string[] = [
+  '知之者不如好之者 好之者不如乐之者 - 孔子',
+  '生活明朗 万物可爱 - 汪曾祺',
+  '我们必须习惯 站在人生的交叉路口 - 鲁迅',
+]
+
+function todayKey(): string {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = `${now.getMonth() + 1}`.padStart(2, '0')
+  const d = `${now.getDate()}`.padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function safeText(value: any): string {
+  if (value == null) return ''
+  return `${value}`.trim()
+}
+
+function pickGeminiText(data: any): string {
+  const outputText = safeText(data?.output_text)
+  if (outputText.length > 0) return outputText
+
+  const steps = data?.steps as any[]
+  if (steps == null) return ''
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
+    if (step?.type != 'model_output') continue
+    const content = step?.content as any[]
+    if (content == null) continue
+    for (let j = 0; j < content.length; j++) {
+      const text = safeText(content[j]?.text)
+      if (text.length > 0) return text
+    }
+  }
+  return ''
 }
 
 export default {
@@ -10,20 +54,132 @@ export default {
     return {
       statusBarHeight: 44,
       navOffset: 148,
-      ideas: [
-        { title: '日常分享', desc: '把旅行 探店 穿搭照片整理成一张好看的拼图。', tag: '社交' },
-        { title: '清单整理', desc: '收纳截图 票据 课程资料 统一成方便转发的长图。', tag: '效率' },
-        { title: '商品对比', desc: '把多张细节图放在同一画布里 方便比较和沟通。', tag: '生活' },
-      ] as IdeaItem[],
+      dayKey: todayKey(),
+      mood: moods[0],
+      encouragement: fallbackLines[0],
+      story: '',
+      isGeneratingLine: false,
+      isGeneratingStory: false,
+      storyTipVisible: false,
     }
   },
   onShow() {
     const sysInfo = uni.getSystemInfoSync()
     this.statusBarHeight = (sysInfo.statusBarHeight as number) ?? 44
+    this.pickDailyMood()
+    this.loadDailyLine()
   },
   methods: {
-    goToCollage() {
-      uni.navigateTo({ url: '/pages/studio/index' })
+    pickDailyMood() {
+      const now = new Date()
+      const index = (now.getDate() + now.getMonth()) % moods.length
+      this.mood = moods[index]
+      this.encouragement = fallbackLines[index]
+    },
+    getGeminiKey(): string {
+      const key = uni.getStorageSync('geminiApiKey')
+      return safeText(key)
+    },
+    loadDailyLine() {
+      const cachedKey = `daily_line_${this.dayKey}`
+      const cached = safeText(uni.getStorageSync(cachedKey))
+      if (cached.length > 0) {
+        this.encouragement = cached
+        return
+      }
+      const key = this.getGeminiKey()
+      if (key.length == 0) return
+      this.generateEncouragement(key, cachedKey)
+    },
+    generateEncouragement(key: string, cachedKey: string) {
+      if (this.isGeneratingLine) return
+      this.isGeneratingLine = true
+      this.callGemini(
+        key,
+        `今天是 ${this.dayKey}。请给出一句适合今天阅读的中文名人名言，包含作者。要求温柔、有力量、适合日常自我鼓励。不要超过32个字，不要使用表情符号。`,
+        (text: string) => {
+          this.isGeneratingLine = false
+          if (text.length > 0) {
+            this.encouragement = text
+            uni.setStorageSync(cachedKey, text)
+          }
+        },
+        () => {
+          this.isGeneratingLine = false
+        },
+      )
+    },
+    generateStory() {
+      if (this.isGeneratingStory) return
+      if (this.story.length > 0) {
+        this.showDailyStoryTip()
+        return
+      }
+      const cachedKey = `daily_story_${this.dayKey}`
+      const cached = safeText(uni.getStorageSync(cachedKey))
+      if (cached.length > 0) {
+        this.story = cached
+        this.showDailyStoryTip()
+        return
+      }
+      const key = this.getGeminiKey()
+      if (key.length == 0) {
+        uni.showToast({ title: '请先在设置中填写 Gemini Key', icon: 'none' })
+        return
+      }
+      this.isGeneratingStory = true
+      this.callGemini(
+        key,
+        `请为 ${this.dayKey} 写一个今日小故事。风格温柔、励志、有画面感，主角是一个普通但认真生活的人。控制在120字以内，不要标题，不要表情符号。`,
+        (text: string) => {
+          this.isGeneratingStory = false
+          if (text.length > 0) {
+            this.story = text
+            uni.setStorageSync(cachedKey, text)
+          }
+        },
+        () => {
+          this.isGeneratingStory = false
+          uni.showToast({ title: '生成失败 请稍后再试', icon: 'none' })
+        },
+      )
+    },
+    showDailyStoryTip() {
+      this.storyTipVisible = true
+      setTimeout(() => {
+        this.storyTipVisible = false
+      }, 2200)
+    },
+    callGemini(key: string, prompt: string, successCb: (text: string) => void, failCb: () => void) {
+      uni.request({
+        url: 'https://generativelanguage.googleapis.com/v1beta/interactions',
+        method: 'POST',
+        header: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': key,
+        },
+        data: {
+          model: 'gemini-3.1-flash-lite',
+          input: prompt,
+        },
+        success: (res) => {
+          const data = res.data as any
+          if (res.statusCode == 429) {
+            uni.showToast({ title: '今日免费额度暂不可用', icon: 'none' })
+            failCb()
+            return
+          }
+          const text = pickGeminiText(data)
+          if (text.length == 0) {
+            failCb()
+            return
+          }
+          successCb(text)
+        },
+        fail: () => {
+          failCb()
+        },
+      })
     },
   },
 }
@@ -33,30 +189,139 @@ export default {
   <view class="container">
     <view class="nav-header" :style="{ paddingTop: statusBarHeight + 'px' }">
       <view class="nav-content">
-        <text class="nav-title">灵感</text>
-        <text class="nav-subtitle">给图片工具留一个更有用的入口</text>
+        <text class="nav-title">今日灵感</text>
+        <text class="nav-subtitle">天气氛围 每日鼓励 轻故事</text>
       </view>
     </view>
 
     <scroll-view scroll-y class="main-scroll" :style="{ marginTop: navOffset + 'px' }">
-      <view class="hero-panel">
-        <text class="hero-title">从一个简单场景开始</text>
-        <text class="hero-desc">当前先做好拼图。后续增加压缩 裁剪 格式转换时 这里会成为工具推荐和使用建议页。</text>
-        <button class="hero-action" @click="goToCollage">开始拼图</button>
-      </view>
-
-      <view class="idea-list">
-        <view v-for="item in ideas" :key="item.title" class="idea-row">
-          <view class="idea-main">
-            <text class="idea-title">{{ item.title }}</text>
-            <text class="idea-desc">{{ item.desc }}</text>
+      <view class="weather-card page-card card-delay-1" :class="mood.className">
+        <view class="weather-scene">
+          <view class="glow glow-main"></view>
+          <view class="glow glow-soft"></view>
+          <view class="sun"></view>
+          <view class="moon"></view>
+          <view class="mountain mountain-back"></view>
+          <view class="mountain mountain-front"></view>
+          <view class="cloud cloud-one"></view>
+          <view class="cloud cloud-two"></view>
+          <view class="cloud cloud-three"></view>
+          <view class="rain-layer rain-back">
+            <view class="rain-line"></view>
+            <view class="rain-line"></view>
+            <view class="rain-line"></view>
           </view>
-          <text class="idea-tag">{{ item.tag }}</text>
+          <view class="rain-layer rain-mid">
+            <view class="rain-line"></view>
+            <view class="rain-line"></view>
+            <view class="rain-line"></view>
+          </view>
+          <view class="rain-layer rain-front">
+            <view class="rain-line"></view>
+            <view class="rain-line"></view>
+          </view>
+          <view class="ripple ripple-one"></view>
+          <view class="ripple ripple-two"></view>
+          <view class="leaf leaf-one"></view>
+          <view class="leaf leaf-two"></view>
+          <view class="bird bird-one"></view>
+          <view class="bird bird-two"></view>
+          <view class="star star-one"></view>
+          <view class="star star-two"></view>
+          <view class="star star-three"></view>
+        </view>
+
+        <view class="weather-copy">
+          <view class="weather-meta">
+            <text>{{ dayKey }}</text>
+            <text>今日氛围</text>
+            <text>非实时天气</text>
+          </view>
+          <view class="weather-bottom">
+            <view class="weather-text">
+              <text class="weather-title">{{ mood.title }}</text>
+              <text class="weather-desc">{{ mood.desc }}</text>
+            </view>
+            <view class="weather-pills">
+              <view class="weather-pill">
+                <view class="line-icon thermometer"></view>
+                <view>
+                  <text class="pill-value">26°</text>
+                  <text class="pill-label">温度</text>
+                </view>
+              </view>
+              <view class="weather-pill">
+                <view class="line-icon drop"></view>
+                <view>
+                  <text class="pill-value">65%</text>
+                  <text class="pill-label">湿度</text>
+                </view>
+              </view>
+              <view class="weather-pill">
+                <view class="line-icon wind"></view>
+                <view>
+                  <text class="pill-value">2级</text>
+                  <text class="pill-label">东南风</text>
+                </view>
+              </view>
+              <view class="weather-pill">
+                <view class="line-icon leaf-icon"></view>
+                <view>
+                  <text class="pill-value">优</text>
+                  <text class="pill-label">空气</text>
+                </view>
+              </view>
+            </view>
+          </view>
         </view>
       </view>
 
-      <view class="quiet-note">
-        <text>导出的图片会保存到系统相册 小程序内暂不重复管理作品。</text>
+      <view class="quote-card page-card card-delay-2">
+        <view class="quote-spark quote-spark-one"></view>
+        <view class="quote-spark quote-spark-two"></view>
+        <view class="petal petal-one"></view>
+        <view class="petal petal-two"></view>
+        <view class="quote-head">
+          <view class="heart-icon"></view>
+          <text class="quote-label">今日名言</text>
+        </view>
+        <text class="quote-text">{{ isGeneratingLine ? '正在准备今天的话...' : encouragement }}</text>
+      </view>
+
+      <view class="story-card page-card card-delay-3">
+        <view class="story-head">
+          <view>
+            <view class="story-title-row">
+              <view class="book-icon"></view>
+              <text class="story-title">每日故事</text>
+            </view>
+            <text class="story-subtitle">Gemini 今日生成</text>
+          </view>
+          <button class="story-button" @click="generateStory">
+            <view class="refresh-icon" :class="{ turning: isGeneratingStory }"></view>
+            <text>{{ isGeneratingStory ? '生成中' : story.length > 0 ? '换一个' : '生成' }}</text>
+          </button>
+        </view>
+
+        <view v-if="storyTipVisible" class="daily-tip">
+          <text class="daily-tip-title">今天就这一篇</text>
+          <text class="daily-tip-text">你当 Gemini 是皇上吗？今天就召见一次。（认真脸）</text>
+        </view>
+
+        <view class="story-cover">
+          <view class="cover-glow"></view>
+          <view class="cover-window"></view>
+          <view class="cover-curtain"></view>
+          <view class="cover-table"></view>
+          <view class="cover-cup"></view>
+          <view class="cover-book"></view>
+          <view class="cover-plant plant-left"></view>
+          <view class="cover-plant plant-right"></view>
+        </view>
+
+        <view class="story-body">
+          <text class="story-text">{{ story.length > 0 ? story : '点击生成 让今天拥有一个小小的开场。' }}</text>
+        </view>
       </view>
 
       <view class="bottom-safe"></view>
@@ -76,7 +341,8 @@ export default {
   left: 0;
   right: 0;
   z-index: 100;
-  background: #fff8f6;
+  background: rgba(255, 248, 246, 0.92);
+  backdrop-filter: blur(18rpx);
   padding-bottom: 14rpx;
 }
 
@@ -87,126 +353,964 @@ export default {
 }
 
 .nav-title {
-  font-size: 48rpx;
+  font-size: 44rpx;
   font-weight: 800;
-  color: #34252a;
+  color: #2e2e2e;
 }
 
 .nav-subtitle {
   margin-top: 6rpx;
   font-size: 25rpx;
-  color: #9b747b;
+  color: #999999;
   font-weight: 500;
 }
 
 .main-scroll {
   height: 100vh;
-  padding: 18rpx 24rpx;
+  padding: 18rpx 32rpx;
+  animation: pageEnter 520ms ease-out both;
 }
 
-.hero-panel {
+.page-card {
+  animation: cardEnter 620ms ease-out both;
+}
+
+.card-delay-1 {
+  animation-delay: 60ms;
+}
+
+.card-delay-2 {
+  animation-delay: 140ms;
+}
+
+.card-delay-3 {
+  animation-delay: 220ms;
+}
+
+.weather-card,
+.quote-card,
+.story-card {
+  border-radius: 30rpx;
+  background: rgba(255, 253, 251, 0.86);
+  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  box-shadow: 0 12rpx 40rpx rgba(0, 0, 0, 0.06);
+}
+
+.weather-card {
+  min-height: 456rpx;
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+  transform: translateZ(0);
+}
+
+.weather-card.sunny {
+  background: linear-gradient(160deg, #bfe5ff 0%, #f8ead5 54%, #fff8f2 100%);
+}
+
+.weather-card.cloudy {
+  background: linear-gradient(160deg, #cdd8e3 0%, #e9eee8 58%, #fff8f6 100%);
+}
+
+.weather-card.rainy {
+  background: linear-gradient(160deg, #dbeaf1 0%, #edf4f2 52%, #fff8f6 100%);
+}
+
+.weather-scene {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
+.glow {
+  position: absolute;
+  border-radius: 999rpx;
+  pointer-events: none;
+}
+
+.glow-main {
+  right: -74rpx;
+  top: -54rpx;
+  width: 300rpx;
+  height: 300rpx;
+  background: rgba(255, 236, 189, 0.55);
+  filter: blur(8rpx);
+  animation: glowBreath 13s ease-in-out infinite;
+}
+
+.glow-soft {
+  left: -120rpx;
+  bottom: 68rpx;
+  width: 320rpx;
+  height: 220rpx;
+  background: rgba(255, 255, 255, 0.34);
+  animation: mistDrift 18s ease-in-out infinite;
+}
+
+.sun {
+  position: absolute;
+  top: 56rpx;
+  right: 68rpx;
+  width: 124rpx;
+  height: 124rpx;
+  border-radius: 80rpx;
+  background: radial-gradient(circle, #fff3c9 0%, #f8d78f 68%, #f2c46a 100%);
+  box-shadow: 0 0 58rpx rgba(247, 201, 116, 0.56);
+  animation: sunBreath 12s ease-in-out infinite;
+}
+
+.moon {
+  position: absolute;
+  top: 58rpx;
+  right: 70rpx;
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 70rpx;
+  background: #fff2c9;
+  box-shadow: 0 0 42rpx rgba(255, 242, 201, 0.45);
+  opacity: 0;
+  animation: moonFloat 14s ease-in-out infinite;
+}
+
+.mountain {
+  position: absolute;
+  bottom: 132rpx;
+  width: 430rpx;
+  height: 170rpx;
+  border-radius: 220rpx 220rpx 0 0;
+  background: rgba(109, 151, 172, 0.22);
+  transform: rotate(-7deg);
+}
+
+.mountain-back {
+  left: 100rpx;
+  opacity: 0.42;
+}
+
+.mountain-front {
+  right: -86rpx;
+  bottom: 108rpx;
+  opacity: 0.30;
+  transform: rotate(-9deg) scale(1.08);
+}
+
+.cloud {
+  position: absolute;
+  width: 188rpx;
+  height: 62rpx;
+  border-radius: 48rpx;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow:
+    40rpx -28rpx 0 8rpx rgba(255, 255, 255, 0.58),
+    92rpx -12rpx 0 16rpx rgba(255, 255, 255, 0.52);
+}
+
+.cloud-one {
+  left: 30rpx;
+  top: 80rpx;
+  animation: cloudMove 16s ease-in-out infinite;
+}
+
+.cloud-two {
+  right: 154rpx;
+  top: 150rpx;
+  opacity: 0.72;
+  transform: scale(0.74);
+  animation: cloudMoveSmall 19s ease-in-out infinite;
+}
+
+.cloud-three {
+  left: 282rpx;
+  top: 46rpx;
+  opacity: 0.42;
+  transform: scale(0.56);
+  animation: cloudMoveTiny 21s ease-in-out infinite;
+}
+
+.rain-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 38rpx;
+  height: 260rpx;
+  opacity: 0;
+}
+
+.rain-line {
+  position: absolute;
+  width: 3rpx;
+  height: 98rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(180deg, rgba(255,255,255,0), rgba(126, 157, 175, 0.42));
+  transform: rotate(8deg);
+}
+
+.rain-back .rain-line:nth-child(1) {
+  left: 118rpx;
+  animation: rainDrop 3.2s linear infinite;
+}
+
+.rain-back .rain-line:nth-child(2) {
+  left: 304rpx;
+  animation: rainDrop 3.4s linear infinite 0.8s;
+}
+
+.rain-back .rain-line:nth-child(3) {
+  right: 124rpx;
+  animation: rainDrop 3.1s linear infinite 1.2s;
+}
+
+.rain-mid .rain-line:nth-child(1) {
+  left: 168rpx;
+  height: 120rpx;
+  animation: rainDrop 2.4s linear infinite;
+}
+
+.rain-mid .rain-line:nth-child(2) {
+  left: 418rpx;
+  height: 112rpx;
+  animation: rainDrop 2.6s linear infinite 0.4s;
+}
+
+.rain-mid .rain-line:nth-child(3) {
+  right: 198rpx;
+  height: 116rpx;
+  animation: rainDrop 2.5s linear infinite 1s;
+}
+
+.rain-front .rain-line:nth-child(1) {
+  left: 62rpx;
+  width: 4rpx;
+  height: 138rpx;
+  animation: rainDrop 1.9s linear infinite 0.2s;
+}
+
+.rain-front .rain-line:nth-child(2) {
+  right: 66rpx;
+  width: 4rpx;
+  height: 132rpx;
+  animation: rainDrop 1.8s linear infinite 0.7s;
+}
+
+.ripple {
+  position: absolute;
+  bottom: 54rpx;
+  width: 60rpx;
+  height: 18rpx;
+  border-radius: 50%;
+  border: 2rpx solid rgba(93, 132, 154, 0.28);
+  opacity: 0;
+}
+
+.ripple-one {
+  left: 166rpx;
+  animation: ripple 3.6s ease-out infinite;
+}
+
+.ripple-two {
+  right: 172rpx;
+  animation: ripple 3.2s ease-out infinite 1s;
+}
+
+.leaf {
+  position: absolute;
+  width: 42rpx;
+  height: 20rpx;
+  border-radius: 42rpx 0 42rpx 0;
+  background: rgba(91, 142, 107, 0.38);
+  transform-origin: 100% 50%;
+}
+
+.leaf-one {
+  left: 36rpx;
+  top: 42rpx;
+  animation: leafSwing 9s ease-in-out infinite;
+}
+
+.leaf-two {
+  left: 84rpx;
+  top: 72rpx;
+  transform: scale(0.72) rotate(-16deg);
+  animation: leafSwingSmall 11s ease-in-out infinite;
+}
+
+.bird {
+  position: absolute;
+  width: 28rpx;
+  height: 12rpx;
+  border-top: 3rpx solid rgba(91, 104, 112, 0.36);
+  border-radius: 50%;
+}
+
+.bird-one {
+  left: 210rpx;
+  top: 90rpx;
+  animation: birdFly 18s linear infinite;
+}
+
+.bird-two {
+  left: 258rpx;
+  top: 118rpx;
+  transform: scale(0.72);
+  animation: birdFly 21s linear infinite 4s;
+}
+
+.star {
+  position: absolute;
+  width: 8rpx;
+  height: 8rpx;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  opacity: 0;
+}
+
+.star-one {
+  left: 92rpx;
+  top: 76rpx;
+  animation: starBlink 7s ease-in-out infinite;
+}
+
+.star-two {
+  left: 220rpx;
+  top: 54rpx;
+  animation: starBlink 8s ease-in-out infinite 1.6s;
+}
+
+.star-three {
+  right: 150rpx;
+  top: 124rpx;
+  animation: starBlink 9s ease-in-out infinite 2.4s;
+}
+
+.sunny .rain-layer,
+.sunny .ripple,
+.sunny .moon,
+.sunny .star {
+  display: none;
+}
+
+.cloudy .sun {
+  opacity: 0.34;
+}
+
+.cloudy .rain-layer,
+.cloudy .ripple,
+.cloudy .moon,
+.cloudy .star,
+.cloudy .bird {
+  display: none;
+}
+
+.rainy .sun {
+  opacity: 0.18;
+}
+
+.rainy .rain-layer,
+.rainy .ripple {
+  opacity: 1;
+}
+
+.rainy .bird,
+.rainy .moon,
+.rainy .star {
+  display: none;
+}
+
+.weather-copy {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
-  padding: 34rpx 30rpx;
-  border-radius: 24rpx;
-  background: #fffdfb;
-  box-shadow: 0 12rpx 34rpx rgba(186, 116, 126, 0.10);
-  border: 1rpx solid rgba(216, 148, 154, 0.16);
+  min-height: 456rpx;
+  padding: 30rpx 28rpx 24rpx;
+  justify-content: space-between;
 }
 
-.hero-title {
-  font-size: 34rpx;
+.weather-meta {
+  display: flex;
+  flex-direction: row;
+  gap: 12rpx;
+}
+
+.weather-meta text {
+  padding: 9rpx 16rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.28);
+  border: 1rpx solid rgba(255, 255, 255, 0.48);
+  backdrop-filter: blur(16rpx);
+  font-size: 22rpx;
+  color: rgba(46, 46, 46, 0.68);
+  font-weight: 700;
+}
+
+.weather-bottom {
+  display: flex;
+  flex-direction: column;
+}
+
+.weather-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.weather-title {
+  font-size: 52rpx;
+  color: #2e2e2e;
   font-weight: 800;
-  color: #34252a;
+  line-height: 1;
 }
 
-.hero-desc {
+.weather-desc {
   margin-top: 12rpx;
   font-size: 26rpx;
-  line-height: 1.55;
-  color: #8f6b72;
+  color: rgba(46, 46, 46, 0.70);
+  line-height: 1.45;
 }
 
-.hero-action {
-  width: 200rpx;
-  height: 72rpx;
-  margin-top: 28rpx;
-  border-radius: 20rpx;
-  background: #d96b7c;
-  color: #ffffff;
-  font-size: 26rpx;
-  font-weight: 800;
+.weather-pills {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: row;
+  gap: 12rpx;
+  margin-top: 26rpx;
 }
 
-.idea-list {
+.weather-pill {
+  flex: 1;
+  min-width: 0;
+  height: 86rpx;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10rpx;
+  padding: 0 12rpx;
+  border-radius: 22rpx;
+  background: rgba(255, 255, 255, 0.28);
+  border: 1rpx solid rgba(255, 255, 255, 0.46);
+  backdrop-filter: blur(18rpx);
+}
+
+.weather-pill view:last-child {
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 14rpx;
-  margin-top: 24rpx;
+  gap: 2rpx;
 }
 
-.idea-row {
+.pill-value {
+  font-size: 24rpx;
+  color: #2e2e2e;
+  font-weight: 800;
+}
+
+.pill-label {
+  font-size: 18rpx;
+  color: rgba(46, 46, 46, 0.58);
+  font-weight: 600;
+}
+
+.line-icon {
+  width: 28rpx;
+  height: 28rpx;
+  flex-shrink: 0;
+  position: relative;
+  opacity: 0.78;
+}
+
+.thermometer {
+  width: 10rpx;
+  height: 28rpx;
+  border-radius: 999rpx;
+  border: 2rpx solid #6a5960;
+}
+
+.thermometer::after {
+  content: '';
+  position: absolute;
+  left: -5rpx;
+  bottom: -4rpx;
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  border: 2rpx solid #6a5960;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.drop {
+  border-radius: 18rpx 18rpx 18rpx 4rpx;
+  border: 2rpx solid #6a5960;
+  transform: rotate(45deg) scale(0.74);
+}
+
+.wind::before,
+.wind::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  height: 2rpx;
+  border-radius: 999rpx;
+  background: #6a5960;
+}
+
+.wind::before {
+  top: 8rpx;
+  width: 28rpx;
+}
+
+.wind::after {
+  top: 18rpx;
+  width: 20rpx;
+}
+
+.leaf-icon {
+  border-radius: 28rpx 0 28rpx 0;
+  border: 2rpx solid #6a5960;
+  transform: rotate(-18deg) scale(0.82);
+}
+
+.quote-card {
+  position: relative;
+  overflow: hidden;
+  margin-top: 28rpx;
+  padding: 32rpx 32rpx 34rpx;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(145deg, rgba(255, 253, 251, 0.96), rgba(255, 238, 239, 0.84));
+}
+
+.quote-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.heart-icon {
+  width: 24rpx;
+  height: 24rpx;
+  border-left: 3rpx solid #d96b7c;
+  border-bottom: 3rpx solid #d96b7c;
+  transform: rotate(-45deg);
+  border-radius: 0 0 0 6rpx;
+}
+
+.quote-label {
+  font-size: 24rpx;
+  color: #c45e71;
+  font-weight: 800;
+}
+
+.quote-text {
+  position: relative;
+  z-index: 2;
+  margin-top: 18rpx;
+  font-size: 34rpx;
+  line-height: 1.55;
+  color: #3c3337;
+  font-weight: 800;
+}
+
+.quote-spark {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(246, 189, 96, 0.48);
+  filter: blur(1rpx);
+  animation: starBlink 7s ease-in-out infinite;
+}
+
+.quote-spark-one {
+  right: 34rpx;
+  top: 34rpx;
+  width: 16rpx;
+  height: 16rpx;
+}
+
+.quote-spark-two {
+  right: 70rpx;
+  top: 64rpx;
+  width: 8rpx;
+  height: 8rpx;
+  animation-delay: 1.4s;
+}
+
+.petal {
+  position: absolute;
+  width: 28rpx;
+  height: 18rpx;
+  border-radius: 28rpx 0 28rpx 0;
+  background: rgba(217, 107, 124, 0.16);
+  animation: petalFloat 11s ease-in-out infinite;
+}
+
+.petal-one {
+  right: 44rpx;
+  bottom: 30rpx;
+}
+
+.petal-two {
+  right: 92rpx;
+  bottom: 52rpx;
+  transform: scale(0.72) rotate(24deg);
+  animation-delay: 2s;
+}
+
+.story-card {
+  margin-top: 28rpx;
+  padding: 30rpx;
+  overflow: hidden;
+}
+
+.story-head {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
   gap: 20rpx;
-  padding: 26rpx;
-  border-radius: 22rpx;
-  background: #fffdfb;
-  border: 1rpx solid rgba(216, 148, 154, 0.12);
 }
 
-.idea-main {
-  min-width: 0;
-  flex: 1;
+.story-head view {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.story-title-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.book-icon {
+  width: 28rpx;
+  height: 24rpx;
+  border: 3rpx solid #7d6a70;
+  border-radius: 5rpx;
+  position: relative;
+}
+
+.book-icon::after {
+  content: '';
+  position: absolute;
+  left: 11rpx;
+  top: -3rpx;
+  bottom: -3rpx;
+  width: 3rpx;
+  background: #7d6a70;
+}
+
+.story-title {
+  font-size: 34rpx;
+  color: #2e2e2e;
+  font-weight: 800;
+}
+
+.story-subtitle {
+  font-size: 24rpx;
+  color: #999999;
+}
+
+.story-button {
+  min-width: 150rpx;
+  height: 64rpx;
+  padding: 0 22rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(135deg, #e68798, #d96b7c);
+  color: #ffffff;
+  font-size: 24rpx;
+  font-weight: 800;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  box-shadow: 0 10rpx 26rpx rgba(217, 107, 124, 0.22);
+}
+
+.story-button:active {
+  transform: scale(0.96);
+}
+
+.daily-tip {
+  margin-top: 20rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 24rpx;
+  background: rgba(255, 248, 246, 0.82);
+  border: 1rpx solid rgba(255, 255, 255, 0.76);
+  box-shadow: 0 12rpx 34rpx rgba(217, 107, 124, 0.10);
   display: flex;
   flex-direction: column;
   gap: 8rpx;
+  animation: tipEnter 260ms ease-out both;
 }
 
-.idea-title {
-  font-size: 29rpx;
+.daily-tip-title {
+  font-size: 25rpx;
+  color: #b85265;
   font-weight: 800;
-  color: #34252a;
 }
 
-.idea-desc {
+.daily-tip-text {
   font-size: 24rpx;
   line-height: 1.45;
-  color: #9b747b;
+  color: #6f585e;
 }
 
-.idea-tag {
-  min-width: 82rpx;
-  height: 48rpx;
-  border-radius: 999rpx;
-  background: #f2f7ef;
-  color: #557160;
-  font-size: 22rpx;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.refresh-icon {
+  width: 22rpx;
+  height: 22rpx;
+  border: 3rpx solid rgba(255, 255, 255, 0.9);
+  border-left-color: transparent;
+  border-radius: 50%;
 }
 
-.quiet-note {
+.refresh-icon.turning {
+  animation: refreshSpin 1.1s linear infinite;
+}
+
+.story-cover {
+  height: 306rpx;
+  position: relative;
   margin-top: 24rpx;
-  padding: 24rpx 28rpx;
-  border-radius: 20rpx;
-  background: #f7edeb;
+  border-radius: 26rpx;
+  overflow: hidden;
+  background: linear-gradient(140deg, #f8c8b9 0%, #f7d7c9 42%, #f9eee4 100%);
+  box-shadow: 0 16rpx 42rpx rgba(151, 91, 82, 0.14);
+  animation: coverBreath 18s ease-in-out infinite;
 }
 
-.quiet-note text {
-  font-size: 24rpx;
-  line-height: 1.5;
-  color: #8f6b72;
+.cover-glow {
+  position: absolute;
+  right: -70rpx;
+  top: -82rpx;
+  width: 300rpx;
+  height: 300rpx;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.40);
+}
+
+.cover-window {
+  position: absolute;
+  right: 38rpx;
+  top: 34rpx;
+  width: 210rpx;
+  height: 146rpx;
+  border-radius: 22rpx;
+  background: rgba(255, 255, 255, 0.38);
+  border: 1rpx solid rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(12rpx);
+}
+
+.cover-curtain {
+  position: absolute;
+  right: 188rpx;
+  top: 18rpx;
+  width: 42rpx;
+  height: 188rpx;
+  border-radius: 0 0 40rpx 40rpx;
+  background: rgba(255, 255, 255, 0.44);
+  transform: skewX(-10deg);
+}
+
+.cover-table {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 92rpx;
+  background: rgba(143, 95, 87, 0.16);
+}
+
+.cover-cup {
+  position: absolute;
+  left: 288rpx;
+  bottom: 78rpx;
+  width: 58rpx;
+  height: 54rpx;
+  border-radius: 0 0 22rpx 22rpx;
+  background: #fffaf7;
+  box-shadow: 0 10rpx 20rpx rgba(109, 69, 61, 0.10);
+}
+
+.cover-cup::after {
+  content: '';
+  position: absolute;
+  right: -18rpx;
+  top: 12rpx;
+  width: 26rpx;
+  height: 24rpx;
+  border-radius: 50%;
+  border: 5rpx solid #fffaf7;
+}
+
+.cover-book {
+  position: absolute;
+  left: 354rpx;
+  bottom: 78rpx;
+  width: 124rpx;
+  height: 42rpx;
+  border-radius: 8rpx;
+  background: rgba(255, 253, 251, 0.72);
+  transform: rotate(-6deg);
+}
+
+.cover-plant {
+  position: absolute;
+  width: 92rpx;
+  height: 128rpx;
+  border-left: 5rpx solid rgba(83, 122, 87, 0.42);
+}
+
+.cover-plant::before,
+.cover-plant::after {
+  content: '';
+  position: absolute;
+  width: 42rpx;
+  height: 22rpx;
+  border-radius: 42rpx 0 42rpx 0;
+  background: rgba(83, 122, 87, 0.40);
+}
+
+.cover-plant::before {
+  left: 8rpx;
+  top: 24rpx;
+  transform: rotate(-22deg);
+}
+
+.cover-plant::after {
+  left: 22rpx;
+  top: 62rpx;
+  transform: rotate(20deg);
+}
+
+.plant-left {
+  left: 52rpx;
+  top: 42rpx;
+  transform: rotate(-18deg);
+}
+
+.plant-right {
+  left: 104rpx;
+  top: 30rpx;
+  transform: rotate(12deg) scale(0.82);
+  opacity: 0.78;
+}
+
+.story-body {
+  margin-top: 24rpx;
+}
+
+.story-text {
+  display: block;
+  font-size: 30rpx;
+  line-height: 1.9;
+  color: #555555;
+  max-height: 342rpx;
+  overflow: hidden;
 }
 
 .bottom-safe {
   height: 180rpx;
+}
+
+@keyframes sunBreath {
+  0%, 100% { transform: scale(1); opacity: 0.94; }
+  50% { transform: scale(1.03); opacity: 1; }
+}
+
+@keyframes glowBreath {
+  0%, 100% { transform: scale(0.96); opacity: 0.62; }
+  50% { transform: scale(1.08); opacity: 0.86; }
+}
+
+@keyframes moonFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12rpx); }
+}
+
+@keyframes mistDrift {
+  0%, 100% { transform: translateX(0); opacity: 0.28; }
+  50% { transform: translateX(46rpx); opacity: 0.44; }
+}
+
+@keyframes cloudMove {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(42rpx); }
+}
+
+@keyframes cloudMoveSmall {
+  0%, 100% { transform: translateX(0) scale(0.74); }
+  50% { transform: translateX(-34rpx) scale(0.74); }
+}
+
+@keyframes cloudMoveTiny {
+  0%, 100% { transform: translateX(0) scale(0.56); }
+  50% { transform: translateX(28rpx) scale(0.56); }
+}
+
+@keyframes rainDrop {
+  0% { transform: translateY(-120rpx) rotate(8deg); opacity: 0; }
+  18% { opacity: 1; }
+  100% { transform: translateY(250rpx) rotate(8deg); opacity: 0; }
+}
+
+@keyframes ripple {
+  0% { transform: scale(0.25); opacity: 0; }
+  24% { opacity: 0.5; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+@keyframes leafSwing {
+  0%, 100% { transform: rotate(-12deg); }
+  50% { transform: rotate(8deg) translateX(8rpx); }
+}
+
+@keyframes leafSwingSmall {
+  0%, 100% { transform: scale(0.72) rotate(-16deg); }
+  50% { transform: scale(0.72) rotate(10deg) translateX(10rpx); }
+}
+
+@keyframes birdFly {
+  0% { transform: translateX(0) translateY(0); opacity: 0; }
+  10% { opacity: 0.42; }
+  80% { opacity: 0.32; }
+  100% { transform: translateX(340rpx) translateY(-36rpx); opacity: 0; }
+}
+
+@keyframes starBlink {
+  0%, 100% { opacity: 0.4; transform: scale(0.82); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes petalFloat {
+  0%, 100% { transform: translateY(0) rotate(0deg); opacity: 0.48; }
+  50% { transform: translateY(-18rpx) rotate(14deg); opacity: 0.86; }
+}
+
+@keyframes coverBreath {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.015); }
+}
+
+@keyframes refreshSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes pageEnter {
+  0% { opacity: 0; transform: translateY(20px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes cardEnter {
+  0% { opacity: 0; transform: translateY(24rpx); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes tipEnter {
+  0% { opacity: 0; transform: translateY(-10rpx) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 </style>
