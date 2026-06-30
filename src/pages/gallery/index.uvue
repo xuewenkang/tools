@@ -1,0 +1,212 @@
+<script lang="uts">
+type IdeaItem = {
+  title: string
+  desc: string
+  tag: string
+}
+
+export default {
+  data() {
+    return {
+      statusBarHeight: 44,
+      navOffset: 148,
+      ideas: [
+        { title: '日常分享', desc: '把旅行 探店 穿搭照片整理成一张好看的拼图。', tag: '社交' },
+        { title: '清单整理', desc: '收纳截图 票据 课程资料 统一成方便转发的长图。', tag: '效率' },
+        { title: '商品对比', desc: '把多张细节图放在同一画布里 方便比较和沟通。', tag: '生活' },
+      ] as IdeaItem[],
+    }
+  },
+  onShow() {
+    const sysInfo = uni.getSystemInfoSync()
+    this.statusBarHeight = (sysInfo.statusBarHeight as number) ?? 44
+  },
+  methods: {
+    goToCollage() {
+      uni.navigateTo({ url: '/pages/studio/index' })
+    },
+  },
+}
+</script>
+
+<template>
+  <view class="container">
+    <view class="nav-header" :style="{ paddingTop: statusBarHeight + 'px' }">
+      <view class="nav-content">
+        <text class="nav-title">灵感</text>
+        <text class="nav-subtitle">给图片工具留一个更有用的入口</text>
+      </view>
+    </view>
+
+    <scroll-view scroll-y class="main-scroll" :style="{ marginTop: navOffset + 'px' }">
+      <view class="hero-panel">
+        <text class="hero-title">从一个简单场景开始</text>
+        <text class="hero-desc">当前先做好拼图。后续增加压缩 裁剪 格式转换时 这里会成为工具推荐和使用建议页。</text>
+        <button class="hero-action" @click="goToCollage">开始拼图</button>
+      </view>
+
+      <view class="idea-list">
+        <view v-for="item in ideas" :key="item.title" class="idea-row">
+          <view class="idea-main">
+            <text class="idea-title">{{ item.title }}</text>
+            <text class="idea-desc">{{ item.desc }}</text>
+          </view>
+          <text class="idea-tag">{{ item.tag }}</text>
+        </view>
+      </view>
+
+      <view class="quiet-note">
+        <text>导出的图片会保存到系统相册 小程序内暂不重复管理作品。</text>
+      </view>
+
+      <view class="bottom-safe"></view>
+    </scroll-view>
+  </view>
+</template>
+
+<style>
+.container {
+  min-height: 100vh;
+  background: #fff8f6;
+}
+
+.nav-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: #fff8f6;
+  padding-bottom: 14rpx;
+}
+
+.nav-content {
+  display: flex;
+  flex-direction: column;
+  padding: 20rpx 32rpx 14rpx;
+}
+
+.nav-title {
+  font-size: 48rpx;
+  font-weight: 800;
+  color: #34252a;
+}
+
+.nav-subtitle {
+  margin-top: 6rpx;
+  font-size: 25rpx;
+  color: #9b747b;
+  font-weight: 500;
+}
+
+.main-scroll {
+  height: 100vh;
+  padding: 18rpx 24rpx;
+}
+
+.hero-panel {
+  display: flex;
+  flex-direction: column;
+  padding: 34rpx 30rpx;
+  border-radius: 24rpx;
+  background: #fffdfb;
+  box-shadow: 0 12rpx 34rpx rgba(186, 116, 126, 0.10);
+  border: 1rpx solid rgba(216, 148, 154, 0.16);
+}
+
+.hero-title {
+  font-size: 34rpx;
+  font-weight: 800;
+  color: #34252a;
+}
+
+.hero-desc {
+  margin-top: 12rpx;
+  font-size: 26rpx;
+  line-height: 1.55;
+  color: #8f6b72;
+}
+
+.hero-action {
+  width: 200rpx;
+  height: 72rpx;
+  margin-top: 28rpx;
+  border-radius: 20rpx;
+  background: #d96b7c;
+  color: #ffffff;
+  font-size: 26rpx;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.idea-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  margin-top: 24rpx;
+}
+
+.idea-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  padding: 26rpx;
+  border-radius: 22rpx;
+  background: #fffdfb;
+  border: 1rpx solid rgba(216, 148, 154, 0.12);
+}
+
+.idea-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.idea-title {
+  font-size: 29rpx;
+  font-weight: 800;
+  color: #34252a;
+}
+
+.idea-desc {
+  font-size: 24rpx;
+  line-height: 1.45;
+  color: #9b747b;
+}
+
+.idea-tag {
+  min-width: 82rpx;
+  height: 48rpx;
+  border-radius: 999rpx;
+  background: #f2f7ef;
+  color: #557160;
+  font-size: 22rpx;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.quiet-note {
+  margin-top: 24rpx;
+  padding: 24rpx 28rpx;
+  border-radius: 20rpx;
+  background: #f7edeb;
+}
+
+.quiet-note text {
+  font-size: 24rpx;
+  line-height: 1.5;
+  color: #8f6b72;
+}
+
+.bottom-safe {
+  height: 180rpx;
+}
+</style>

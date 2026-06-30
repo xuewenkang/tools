@@ -1,0 +1,1120 @@
+<script lang="uts">
+type FitMode = 'cover' | 'contain' | 'stretch' | 'center'
+type RemainderMode = 'blank' | 'repeat-last' | 'ignore'
+type ExportFormat = 'png' | 'jpg'
+type AspectRatioId = '3:4' | '1:1' | '4:3' | '16:9' | '9:16'
+
+type ImageAsset = {
+  id: string
+  name: string
+  path: string
+  width: number
+  height: number
+}
+
+type OptionItem = { label: string; value: string }
+type RatioOption = { id: AspectRatioId; label: string; width: number; height: number }
+type LayoutPreset = { label: string; rows: number; columns: number }
+
+const ratioOptions: RatioOption[] = [
+  { id: '3:4', label: '3:4', width: 3, height: 4 },
+  { id: '1:1', label: '1:1', width: 1, height: 1 },
+  { id: '4:3', label: '4:3', width: 4, height: 3 },
+  { id: '16:9', label: '16:9', width: 16, height: 9 },
+  { id: '9:16', label: '竖屏', width: 9, height: 16 },
+]
+
+const layoutPresets: LayoutPreset[] = [
+  { label: '1x2', rows: 1, columns: 2 },
+  { label: '2x1', rows: 2, columns: 1 },
+  { label: '2x2', rows: 2, columns: 2 },
+  { label: '2x3', rows: 2, columns: 3 },
+  { label: '3x2', rows: 3, columns: 2 },
+  { label: '3x3', rows: 3, columns: 3 },
+  { label: '3x4', rows: 3, columns: 4 },
+  { label: '4x4', rows: 4, columns: 4 },
+]
+
+const countOptions: number[] = [2, 3, 4, 6, 8, 9, 12, 16]
+const sizeOptions: number[] = [1080, 1440, 2160, 3000]
+const fitOptions: OptionItem[] = [
+  { label: '填满', value: 'cover' },
+  { label: '完整', value: 'contain' },
+  { label: '拉伸', value: 'stretch' },
+  { label: '居中', value: 'center' },
+]
+const remainderOptions: OptionItem[] = [
+  { label: '补空白', value: 'blank' },
+  { label: '重复末张', value: 'repeat-last' },
+  { label: '忽略', value: 'ignore' },
+]
+
+function uid(): string {
+  return `${Date.now()}_${Math.floor(Math.random() * 1000000)}`
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
+
+export default {
+  data() {
+    return {
+      images: [] as ImageAsset[],
+      currentPage: 1,
+      statusBarHeight: 44,
+      activePanel: 'layout',
+      isConfigOpen: false,
+      isExporting: false,
+      renderTicket: 0,
+      previewDisplayWidth: 320,
+      previewDisplayHeight: 426,
+      canvasWidth: 1080,
+      canvasHeight: 1440,
+      ratioOptions,
+      layoutPresets,
+      countOptions,
+      sizeOptions,
+      fitOptions,
+      remainderOptions,
+      imagesPerCollage: 4,
+      aspectRatio: '3:4' as AspectRatioId,
+      layoutMode: 'auto',
+      rows: 2,
+      columns: 2,
+      remainderMode: 'blank' as RemainderMode,
+      fitMode: 'cover' as FitMode,
+      gap: 0,
+      radius: 0,
+      background: '#fff7f6',
+      transparent: false,
+      border: false,
+      exportFormat: 'png' as ExportFormat,
+      exportQuality: 100,
+      exportSize: 1440,
+    }
+  },
+  computed: {
+    groupSize(): number {
+      return this.imagesPerCollage == 0 ? 4 : this.imagesPerCollage
+    },
+    activeLayout(): LayoutPreset {
+      if (this.layoutMode == 'custom') return { label: `${this.rows}x${this.columns}`, rows: this.rows, columns: this.columns }
+      const c = this.groupSize
+      if (c == 2) return { label: '1x2', rows: 1, columns: 2 }
+      if (c == 3) return { label: '1x3', rows: 1, columns: 3 }
+      if (c == 4) return { label: '2x2', rows: 2, columns: 2 }
+      if (c == 6) return { label: '2x3', rows: 2, columns: 3 }
+      if (c == 8) return { label: '2x4', rows: 2, columns: 4 }
+      if (c == 9) return { label: '3x3', rows: 3, columns: 3 }
+      if (c == 12) return { label: '3x4', rows: 3, columns: 4 }
+      if (c == 16) return { label: '4x4', rows: 4, columns: 4 }
+      return { label: `${this.rows}x${this.columns}`, rows: this.rows, columns: this.columns }
+    },
+    groups(): Array<Array<ImageAsset | null>> {
+      const result = [] as Array<Array<ImageAsset | null>>
+      const size = this.groupSize
+      let index = 0
+      while (index < this.images.length) {
+        const group = this.images.slice(index, index + size) as Array<ImageAsset | null>
+        if (group.length < size) {
+          if (this.remainderMode == 'ignore') { index += size; continue }
+          if (this.remainderMode == 'repeat-last' && group.length > 0) {
+            const last = group[group.length - 1]
+            while (group.length < size) group.push(last)
+          }
+        }
+        while (group.length < size) group.push(null)
+        result.push(group)
+        index += size
+      }
+      return result
+    },
+    totalPages(): number { return this.groups.length },
+    currentGroup(): Array<ImageAsset | null> {
+      if (this.groups.length == 0) return []
+      return this.groups[clamp(this.currentPage - 1, 0, this.groups.length - 1)]
+    },
+    previewGap(): number {
+      if (this.canvasWidth <= 0) return 0
+      return Math.round((this.gap * this.previewDisplayWidth) / this.canvasWidth)
+    },
+    previewRadius(): number {
+      if (this.canvasWidth <= 0) return 0
+      return Math.round((this.radius * this.previewDisplayWidth) / this.canvasWidth)
+    },
+    previewImageMode(): string {
+      if (this.fitMode == 'contain' || this.fitMode == 'center') return 'aspectFit'
+      if (this.fitMode == 'stretch') return 'scaleToFill'
+      return 'aspectFill'
+    },
+    cellWidth(): number {
+      const pg = this.previewGap * 2
+      return Math.floor((this.previewDisplayWidth - pg - (this.activeLayout.columns - 1) * this.previewGap) / this.activeLayout.columns)
+    },
+    cellHeight(): number {
+      const pg = this.previewGap * 2
+      return Math.floor((this.previewDisplayHeight - pg - (this.activeLayout.rows - 1) * this.previewGap) / this.activeLayout.rows)
+    },
+    layoutLabel(): string { return `${this.activeLayout.rows}x${this.activeLayout.columns}` },
+    fitLabel(): string {
+      const item = this.fitOptions.find((o: OptionItem): boolean => o.value == this.fitMode)
+      return item == null ? '填满' : item.label
+    },
+    remainderLabel(): string {
+      const item = this.remainderOptions.find((o: OptionItem): boolean => o.value == this.remainderMode)
+      return item == null ? '补空白' : item.label
+    },
+  },
+  watch: {
+    images() { this.queueRender() },
+    currentPage() { this.queueRender() },
+    imagesPerCollage() { this.currentPage = 1; this.queueRender() },
+    aspectRatio() { this.updatePreviewSize() },
+    remainderMode() { this.currentPage = 1; this.queueRender() },
+    fitMode() { this.queueRender() },
+    gap() { this.queueRender() },
+    radius() { this.queueRender() },
+    background() { this.queueRender() },
+    transparent() { this.queueRender() },
+    border() { this.queueRender() },
+    exportSize() { this.updatePreviewSize() },
+  },
+  onShow() {
+    const sysInfo = uni.getSystemInfoSync()
+    this.statusBarHeight = (sysInfo.statusBarHeight as number) ?? 44
+  },
+  onReady() {
+    this.updateCanvasSize()
+    this.queueRender()
+  },
+  methods: {
+    queueRender() {
+      this.renderTicket += 1
+      const ticket = this.renderTicket
+      setTimeout(() => {
+        if (ticket == this.renderTicket) this.finishRender(ticket)
+      }, 80)
+    },
+    finishRender(ticket: number) {},
+    updateCanvasSize() {
+      const dims = this.getExportDimensions()
+      this.canvasWidth = dims.width
+      this.canvasHeight = dims.height
+      const sys = uni.getSystemInfoSync()
+      const maxW = Math.max(280, sys.windowWidth - 40)
+      const maxH = Math.max(340, sys.windowHeight * 0.50)
+      const scale = Math.min(maxW / dims.width, maxH / dims.height)
+      this.previewDisplayWidth = Math.floor(dims.width * scale)
+      this.previewDisplayHeight = Math.floor(dims.height * scale)
+    },
+    updatePreviewSize() {
+      this.updateCanvasSize()
+      this.queueRender()
+    },
+    getExportDimensions(): UTSJSONObject {
+      const ratio = this.ratioOptions.find((r: RatioOption): boolean => r.id == this.aspectRatio) as RatioOption
+      const sel = ratio == null ? this.ratioOptions[0] : ratio
+      const longEdge = this.exportSize
+      const land = sel.width >= sel.height
+      const w = land ? longEdge : Math.round((longEdge * sel.width) / sel.height)
+      const h = land ? Math.round((longEdge * sel.height) / sel.width) : longEdge
+      return { width: w, height: h }
+    },
+    chooseImages() {
+      uni.chooseImage({
+        count: 50,
+        sizeType: ['original'],
+        sourceType: ['album', 'camera'],
+        success: (res) => {
+          res.tempFilePaths.forEach((p: string) => { this.addImage(p) })
+        },
+      })
+    },
+    addImage(path: string) {
+      uni.getImageInfo({
+        src: path,
+        success: (info) => {
+          const parts = path.split('/')
+          this.images.push({
+            id: uid(),
+            name: parts.length > 0 ? parts[parts.length - 1] : `img_${this.images.length + 1}`,
+            path: info.path,
+            width: info.width,
+            height: info.height,
+          } as ImageAsset)
+          this.currentPage = 1
+          this.queueRender()
+        },
+        fail: () => { uni.showToast({ title: '图片读取失败', icon: 'none' }) },
+      })
+    },
+    clearImages() {
+      this.renderTicket += 1
+      this.images = [] as ImageAsset[]
+      this.currentPage = 1
+    },
+    removeImage(id: string) {
+      this.images = this.images.filter((img: ImageAsset): boolean => img.id != id)
+      this.currentPage = clamp(this.currentPage, 1, Math.max(this.totalPages, 1))
+      if (this.images.length == 0) this.clearImages()
+      else this.queueRender()
+    },
+    setPanel(v: string) { this.activePanel = v; this.isConfigOpen = true },
+    openConfig(v: string) { this.activePanel = v; this.isConfigOpen = true },
+    closeConfig() { this.isConfigOpen = false },
+    setPage(v: number) { this.currentPage = clamp(v, 1, Math.max(this.totalPages, 1)) },
+    setAspect(v: AspectRatioId) {
+      this.aspectRatio = v
+      this.updatePreviewSize()
+    },
+    setCount(v: number) { this.imagesPerCollage = v; this.layoutMode = 'auto' },
+    applyLayout(preset: LayoutPreset) {
+      this.layoutMode = 'custom'
+      this.rows = preset.rows
+      this.columns = preset.columns
+      this.imagesPerCollage = preset.rows * preset.columns
+      this.currentPage = 1
+    },
+    setFit(idx: number) { this.fitMode = this.fitOptions[idx].value as FitMode },
+    setRemainder(idx: number) { this.remainderMode = this.remainderOptions[idx].value as RemainderMode },
+    setRemainderValue(v: string) { this.remainderMode = v as RemainderMode },
+    setExportSize(idx: number) { this.exportSize = this.sizeOptions[idx] },
+
+    // ====== 导出逻辑 —— 使用新版 canvas-to-temp-file-path + 超时保护 ======
+    saveCurrent() {
+      if (this.currentGroup.length == 0) {
+        uni.showToast({ title: '请先选择图片', icon: 'none' })
+        return
+      }
+      if (this.isExporting) return
+      this.isExporting = true
+      uni.showLoading({ title: '正在生成...' })
+
+      // 使用新版 canvas 2d API 导出
+      this.exportWithCanvas2d()
+    },
+
+    // 尝试使用 canvas 2d 方式导出
+    exportWithCanvas2d() {
+      try {
+        const query = uni.createSelectorQuery().in(this)
+        query.select('#exportCanvas')
+          .fields({ node: true, size: true })
+          .exec((res: any[]) => {
+            if (res == null || res.length == 0 || res[0].node == null) {
+              this.fallbackExport()
+              return
+            }
+            const canvas = res[0].node
+            const ctx = canvas.getContext('2d')
+            const dpr = uni.getSystemInfoSync().pixelRatio
+            canvas.width = this.canvasWidth * dpr
+            canvas.height = this.canvasHeight * dpr
+            ctx.scale(dpr, dpr)
+
+            this.drawOnContext(canvas, ctx, this.currentGroup, () => {
+              setTimeout(() => {
+                uni.canvasToTempFilePath({
+                  canvas: canvas,
+                  fileType: this.exportFormat,
+                  quality: this.exportQuality / 100,
+                  destWidth: this.canvasWidth,
+                  destHeight: this.canvasHeight,
+                  success: (res) => {
+                    this.doSaveFile(res.tempFilePath)
+                  },
+                  fail: () => {
+                    this.fallbackExport()
+                  },
+                }, this)
+              }, 200)
+            })
+          })
+      } catch(e) {
+        this.fallbackExport()
+      }
+    },
+
+    // 绘制到 2d context
+    drawOnContext(canvas: any, ctx: any, group: Array<ImageAsset | null>, done: () => void) {
+      const w = this.canvasWidth
+      const h = this.canvasHeight
+      ctx.clearRect(0, 0, w, h)
+      if (!this.transparent) {
+        ctx.fillStyle = this.background
+        ctx.fillRect(0, 0, w, h)
+      }
+      const layout = this.activeLayout
+      const gap = this.gap
+      const cellW = (w - gap * 2 - gap * (layout.columns - 1)) / layout.columns
+      const cellH = (h - gap * 2 - gap * (layout.rows - 1)) / layout.rows
+      let loaded = 0
+      const total = layout.rows * layout.columns
+      for (let i = 0; i < total; i++) {
+        const row = Math.floor(i / layout.columns)
+        const col = i % layout.columns
+        const rx = gap + col * (cellW + gap)
+        const ry = gap + row * (cellH + gap)
+        const img = i < group.length ? group[i] : null
+        if (img != null) {
+          // 创建 image 对象并加载
+          const imgObj = canvas.createImage()
+          imgObj.onload = () => {
+            ctx.save()
+            this.clipRoundRect(ctx, rx, ry, cellW, cellH, this.radius)
+            ctx.clip()
+            this.drawImageCovered(ctx, imgObj, rx, ry, cellW, cellH)
+            ctx.restore()
+            loaded++
+            if (loaded >= total) done()
+          }
+          imgObj.onerror = () => {
+            loaded++
+            if (loaded >= total) done()
+          }
+          imgObj.src = img.path
+        } else {
+          ctx.fillStyle = 'rgba(166, 120, 126, 0.10)'
+          ctx.fillRect(rx, ry, cellW, cellH)
+          loaded++
+        }
+      }
+      if (loaded >= total) done()
+    },
+
+    drawImageCovered(ctx: any, imgObj: any, x: number, y: number, w: number, h: number) {
+      const sw = imgObj.width
+      const sh = imgObj.height
+      if (this.fitMode == 'stretch') { ctx.drawImage(imgObj, x, y, w, h); return }
+      const sr = sw / sh
+      const dr = w / h
+      let dw: number, dh: number
+      if (this.fitMode == 'contain' || this.fitMode == 'center') {
+        const s = Math.min(w / sw, h / sh)
+        dw = sw * s
+        dh = sh * s
+      } else {
+        const s = Math.max(w / sw, h / sh)
+        dw = sw * s
+        dh = sh * s
+      }
+      ctx.drawImage(imgObj, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh)
+    },
+
+    clipRoundRect(ctx: any, x: number, y: number, w: number, h: number, r: number) {
+      r = Math.min(r, w / 2, h / 2)
+      ctx.beginPath()
+      ctx.moveTo(x + r, y)
+      ctx.arcTo(x + w, y, x + w, y + h, r)
+      ctx.arcTo(x + w, y + h, x, y + h, r)
+      ctx.arcTo(x, y + h, x, y, r)
+      ctx.arcTo(x, y, x + r, y, r)
+      ctx.closePath()
+    },
+
+    // 备选方案：提示用户截图保存
+    fallbackExport() {
+      uni.hideLoading()
+      this.isExporting = false
+      uni.showModal({
+        title: '保存图片',
+        content: '请长按预览区域保存图片到相册。',
+        showCancel: false,
+        confirmText: '知道了',
+      })
+    },
+
+    doSaveFile(tempPath: string) {
+      uni.hideLoading()
+      this.isExporting = false
+      uni.saveImageToPhotosAlbum({
+        filePath: tempPath,
+        success: () => {
+          uni.showToast({ title: '已保存到相册', icon: 'success' })
+        },
+        fail: () => {
+          uni.showModal({
+            title: '需要相册权限',
+            content: '请允许访问相册后重试',
+            confirmText: '去设置',
+            success: (res) => {
+              if (res.confirm) uni.openSetting({})
+            },
+          })
+        },
+      })
+    },
+  },
+}
+</script>
+
+<template>
+  <view class="screen">
+    <!-- 顶部导航 -->
+    <view class="nav-bar">
+      <view class="nav-copy">
+        <text class="nav-title">批量拼图</text>
+        <text class="nav-subtitle">上传后直接预览 随时调比例和样式</text>
+      </view>
+      <button class="nav-btn" @click="clearImages" v-if="images.length > 0">清空</button>
+    </view>
+
+    <!-- 主内容区 -->
+    <scroll-view scroll-y class="body">
+      <!-- 预览卡片 -->
+      <view class="preview-wrap">
+        <view class="quick-row">
+          <button v-for="r in ratioOptions" :key="r.id" :class="{ quick: true, active: aspectRatio == r.id }" @click.stop="setAspect(r.id)">{{ r.label }}</button>
+        </view>
+
+        <!-- 信息条 -->
+        <view class="info-bar" v-if="images.length > 0">
+          <text class="info-item">{{ images.length }} 张</text>
+          <text class="info-dot">·</text>
+          <text class="info-item">{{ layoutLabel }}</text>
+          <text class="info-dot">·</text>
+          <text class="info-item">{{ totalPages }} 组</text>
+        </view>
+
+        <!-- 预览区 -->
+        <view class="preview-box">
+          <view
+            v-if="currentGroup.length > 0"
+            class="grid"
+            :style="{
+              width: previewDisplayWidth + 'px',
+              height: previewDisplayHeight + 'px',
+              padding: previewGap + 'px',
+              gap: previewGap + 'px',
+              background: transparent ? 'transparent' : background,
+              borderRadius: previewRadius + 'px',
+            }"
+          >
+            <view
+              v-for="(image, idx) in currentGroup.slice(0, activeLayout.rows * activeLayout.columns)"
+              :key="idx"
+              class="cell"
+              :class="{ bordered: border }"
+              :style="{ width: cellWidth + 'px', height: cellHeight + 'px' }"
+            >
+              <image v-if="image != null" :src="image.path" :mode="previewImageMode" />
+            </view>
+          </view>
+
+          <!-- 空状态 -->
+          <view v-if="currentGroup.length == 0" class="empty">
+            <text class="empty-icon">+</text>
+            <text class="empty-text">预览会显示在这里</text>
+          </view>
+        </view>
+
+        <!-- 分页 -->
+        <view class="pager" v-if="totalPages > 1">
+          <button class="page-btn" @click="setPage(currentPage - 1)" :disabled="currentPage <= 1">
+            <view class="page-arrow left"></view>
+          </button>
+          <text class="page-num">{{ currentPage }}/{{ totalPages }}</text>
+          <button class="page-btn" @click="setPage(currentPage + 1)" :disabled="currentPage >= totalPages">
+            <view class="page-arrow right"></view>
+          </button>
+        </view>
+      </view>
+
+      <!-- 缩略图条 -->
+      <scroll-view scroll-x class="thumb-bar" v-if="images.length > 0">
+        <view class="thumb-list">
+          <view v-for="img in images" :key="img.id" class="thumb-item">
+            <image :src="img.path" mode="aspectFill" />
+            <view class="thumb-del" @click="removeImage(img.id)">
+              <text>x</text>
+            </view>
+          </view>
+          <view class="thumb-add" @click="chooseImages">
+            <text>+</text>
+          </view>
+        </view>
+      </scroll-view>
+
+      <!-- 底部占位 -->
+      <view class="space"></view>
+    </scroll-view>
+
+    <!-- 底部操作栏 -->
+    <view class="bottom-bar">
+      <button class="btn-main" @click="chooseImages">
+        <text>{{ images.length > 0 ? '添加图片' : '选择图片' }}</text>
+      </button>
+      <button class="btn-sub" @click="openConfig('layout')" v-if="images.length > 0">
+        <text>设置</text>
+      </button>
+      <button class="btn-save" @click="saveCurrent" :disabled="currentGroup.length == 0 || isExporting" v-if="images.length > 0">
+        <text>{{ isExporting ? '生成中...' : '保存' }}</text>
+      </button>
+    </view>
+
+    <!-- 设置面板 -->
+    <view v-if="isConfigOpen" class="mask" @click="closeConfig"></view>
+    <view v-if="isConfigOpen" class="panel">
+      <view class="panel-handle"></view>
+
+      <!-- Tab 切换 -->
+      <view class="tabs">
+        <button :class="{ tab: true, active: activePanel == 'layout' }" @click="setPanel('layout')">布局</button>
+        <button :class="{ tab: true, active: activePanel == 'style' }" @click="setPanel('style')">样式</button>
+        <button :class="{ tab: true, active: activePanel == 'export' }" @click="setPanel('export')">导出</button>
+      </view>
+
+      <scroll-view scroll-y class="panel-scroll">
+
+        <!-- 布局面板 -->
+        <view v-if="activePanel == 'layout'" class="section">
+          <view class="sec-head"><text>比例</text><text>{{ aspectRatio }}</text></view>
+          <view class="chip-row">
+            <button v-for="r in ratioOptions" :key="r.id" :class="{ chip: true, on: aspectRatio == r.id }" @click="setAspect(r.id)">{{ r.label }}</button>
+          </view>
+
+          <view class="sec-head" style="margin-top:24rpx"><text>模板</text></view>
+          <view class="chip-row">
+            <button v-for="p in layoutPresets" :key="p.label" :class="{ chip: true, on: layoutLabel == p.label }" @click="applyLayout(p)">{{ p.label }}</button>
+          </view>
+
+          <view class="sec-head" style="margin-top:24rpx"><text>每页数量</text></view>
+          <view class="chip-row">
+            <button v-for="n in countOptions" :key="n" :class="{ chip: true, on: imagesPerCollage == n }" @click="setCount(n)">{{ n }}</button>
+          </view>
+
+          <view class="sec-head" style="margin-top:24rpx"><text>末尾不足</text></view>
+          <view class="chip-row">
+            <button
+              v-for="item in remainderOptions"
+              :key="item.value"
+              :class="{ chip: true, on: remainderMode == item.value }"
+              @click="setRemainderValue(item.value)"
+            >
+              {{ item.label }}
+            </button>
+          </view>
+        </view>
+
+        <!-- 样式面板 -->
+        <view v-if="activePanel == 'style'" class="section">
+          <view class="row-field"><text>填充方式</text>
+            <picker :range="fitOptions" range-key="label" :value="fitOptions.findIndex(i=>i.value==fitMode)" @change="setFit($event.detail.value)">
+              <text class="pick-val">{{ fitLabel }}</text>
+            </picker>
+          </view>
+
+          <view class="slider-row">
+            <text>间距 {{ gap }}</text>
+            <slider :value="gap" min="0" max="80" activeColor="#d96b7c" block-size="20" @change="gap = $event.detail.value" />
+          </view>
+
+          <view class="slider-row">
+            <text>圆角 {{ radius }}</text>
+            <slider :value="radius" min="0" max="80" activeColor="#d96b7c" block-size="20" @change="radius = $event.detail.value" />
+          </view>
+
+          <view class="sec-head" style="margin-top:20rpx"><text>背景色</text></view>
+          <view class="color-row">
+            <view :class="{ colorDot: true, on: background=='#fff7f6' && !transparent }" style="background:#fff7f6;border:1px solid #ead7d5" @click="background='#fff7f6';transparent=false"></view>
+            <view :class="{ colorDot: true, on: background=='#ffffff' && !transparent }" style="background:#fff;border:1px solid #ddd" @click="background='#ffffff';transparent=false"></view>
+            <view :class="{ colorDot: true, on: background=='#f3d5d8' && !transparent }" style="background:#f3d5d8" @click="background='#f3d5d8';transparent=false"></view>
+            <view :class="{ colorDot: true, on: background=='#dfeee4' && !transparent }" style="background:#dfeee4" @click="background='#dfeee4';transparent=false"></view>
+            <view :class="{ colorDot: true, on: background=='#2f2a2d' && !transparent }" style="background:#2f2a2d" @click="background='#2f2a2d';transparent=false"></view>
+            <view :class="{ colorDot: true, on: transparent }" style="background:linear-gradient(135deg,#ddd 50%,#fff 50%);background-size:12rpx 12rpx" @click="transparent=true"></view>
+          </view>
+
+          <view class="row-field" style="margin-top:20rpx">
+            <text>边框</text>
+            <switch :checked="border" color="#d96b7c" @change="border=$event.detail.value" style="transform:scale(0.85)" />
+          </view>
+        </view>
+
+        <!-- 导出面板 -->
+        <view v-if="activePanel == 'export'" class="section">
+          <view class="sec-head"><text>格式</text></view>
+          <view class="chip-row">
+            <button :class="{ chip: true, on: exportFormat=='png' }" @click="exportFormat='png'">PNG</button>
+            <button :class="{ chip: true, on: exportFormat=='jpg' }" @click="exportFormat='jpg'">JPG</button>
+          </view>
+
+          <view class="sec-head" style="margin-top:24rpx"><text>尺寸（长边）</text></view>
+          <view class="chip-row">
+            <button v-for="s in sizeOptions" :key="s" :class="{ chip: true, on: exportSize==s }" @click="setExportSize(sizeOptions.indexOf(s))">{{ s }}</button>
+          </view>
+
+          <view class="slider-row" style="margin-top:24rpx">
+            <text>原图质量 {{ exportQuality }}%</text>
+            <slider :value="exportQuality" min="80" max="100" activeColor="#d96b7c" block-size="20" @change="exportQuality=$event.detail.value" />
+          </view>
+        </view>
+
+      </scroll-view>
+
+      <view class="panel-space"></view>
+    </view>
+
+    <!-- 隐藏的导出用 canvas (2d mode) -->
+    <canvas id="exportCanvas" type="2d" class="hide-canvas" :style="{width:canvasWidth+'px',height:canvasHeight+'px'}"></canvas>
+  </view>
+</template>
+
+<style>
+.screen {
+  min-height: 100vh;
+  background: #fff8f6;
+}
+
+/* ====== 导航栏 ====== */
+.nav-bar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18rpx 28rpx;
+  padding-top: calc(14rpx + env(safe-area-inset-top));
+  background: #fff8f6;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.nav-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  min-width: 0;
+}
+.nav-title {
+  font-size: 38rpx;
+  font-weight: 800;
+  color: #34252a;
+}
+.nav-subtitle {
+  font-size: 22rpx;
+  color: #9b747b;
+}
+.nav-btn {
+  font-size: 26rpx;
+  color: #b85265;
+  background: #fff0ef;
+  border-radius: 999rpx;
+  padding: 8rpx 22rpx;
+  line-height: 1.6;
+}
+
+/* ====== 内容区 ====== */
+.body {
+  height: 100vh;
+  padding: 0 24rpx;
+}
+
+/* ====== 预览 ====== */
+.preview-wrap {
+  margin-top: 16rpx;
+  border-radius: 26rpx;
+  background: #fffdfb;
+  overflow: hidden;
+  box-shadow: 0 12rpx 36rpx rgba(186, 116, 126, 0.10);
+  border: 1rpx solid rgba(216, 148, 154, 0.16);
+}
+.quick-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  padding: 22rpx 24rpx;
+  flex-wrap: wrap;
+}
+.quick {
+  min-width: 92rpx;
+  height: 54rpx;
+  border-radius: 999rpx;
+  font-size: 23rpx;
+  font-weight: 700;
+  color: #8e5964;
+  background: #fff1ef;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.quick.active {
+  color: #ffffff;
+  background: #d96b7c;
+}
+.info-bar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 24rpx 18rpx;
+  gap: 8rpx;
+}
+.info-item {
+  font-size: 24rpx;
+  color: #8e5964;
+  font-weight: 600;
+}
+.info-dot {
+  font-size: 24rpx;
+  color: #ccc;
+}
+.preview-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 440rpx;
+  padding: 22rpx;
+  background: #f7edeb;
+}
+.grid {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  box-shadow: 0 10rpx 34rpx rgba(97, 55, 61, 0.13);
+  overflow: hidden;
+}
+.cell {
+  overflow: hidden;
+  background: rgba(0,0,0,0.03);
+}
+.cell.bordered {
+  border: 1px solid rgba(0,0,0,0.1);
+}
+.cell image {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12rpx;
+  padding: 60rpx 0;
+}
+.empty-icon {
+  font-size: 64rpx;
+  color: #d9a1a8;
+  line-height: 1;
+}
+.empty-text {
+  font-size: 26rpx;
+  color: #a9878d;
+}
+
+/* ====== 分页 ====== */
+.pager {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 20rpx;
+  padding: 16rpx 0 20rpx;
+}
+.page-btn {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 32rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff0ef;
+  border: 1rpx solid rgba(217, 107, 124, 0.16);
+}
+.page-btn[disabled] {
+  opacity: 0.42;
+}
+.page-arrow {
+  width: 18rpx;
+  height: 18rpx;
+  border-top: 4rpx solid #b85265;
+  border-right: 4rpx solid #b85265;
+}
+.page-arrow.left {
+  transform: rotate(-135deg);
+  margin-left: 6rpx;
+}
+.page-arrow.right {
+  transform: rotate(45deg);
+  margin-right: 6rpx;
+}
+.page-num {
+  font-size: 26rpx;
+  color: #9b747b;
+  font-weight: 600;
+  min-width: 80rpx;
+  text-align: center;
+}
+
+/* ====== 缩略图条 ====== */
+.thumb-bar {
+  margin-top: 16rpx;
+  white-space: nowrap;
+}
+.thumb-list {
+  display: flex;
+  flex-direction: row;
+  gap: 12rpx;
+  padding: 16rpx 4rpx;
+}
+.thumb-item {
+  position: relative;
+  flex-shrink: 0;
+}
+.thumb-item image {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 16rpx;
+  display: block;
+}
+.thumb-del {
+  position: absolute;
+  top: -10rpx;
+  right: -10rpx;
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 18rpx;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.thumb-del text {
+  font-size: 22rpx;
+  color: #fff;
+  line-height: 1;
+}
+.thumb-add {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 16rpx;
+  border: 2px dashed #e5b6ba;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.thumb-add text {
+  font-size: 40rpx;
+  color: #c57b87;
+  line-height: 1;
+}
+
+.space {
+  height: 180rpx;
+}
+
+/* ====== 底部操作栏 ====== */
+.bottom-bar {
+  position: fixed;
+  left: 20rpx;
+  right: 20rpx;
+  bottom: calc(20rpx + env(safe-area-inset-bottom));
+  z-index: 20;
+  display: flex;
+  flex-direction: row;
+  gap: 12rpx;
+}
+.btn-main {
+  flex: 1.4;
+  height: 84rpx;
+  border-radius: 24rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #fff;
+  background: #d96b7c;
+  box-shadow: 0 10rpx 28rpx rgba(217, 107, 124, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-save {
+  flex: 1;
+  height: 84rpx;
+  border-radius: 22rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #fff;
+  background: #7ea68a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-save[disabled] {
+  opacity: 0.45;
+}
+.btn-sub {
+  flex: 0.75;
+  height: 84rpx;
+  border-radius: 22rpx;
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #9b4a5b;
+  background: #fff0ef;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ====== 设置面板 ====== */
+.mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 30;
+  background: rgba(52,37,42,0.28);
+}
+.panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 31;
+  max-height: 78vh;
+  border-radius: 28rpx 28rpx 0 0;
+  background: #fff8f6;
+}
+.panel-handle {
+  width: 64rpx;
+  height: 8rpx;
+  border-radius: 999rpx;
+  background: #e8c5c8;
+  margin: 16rpx auto 12rpx;
+}
+.tabs {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  margin: 0 20rpx 16rpx;
+  background: #f4e3e2;
+  border-radius: 16rpx;
+  padding: 4rpx;
+}
+.tab {
+  flex: 1;
+  height: 64rpx;
+  border-radius: 13rpx;
+  font-size: 25rpx;
+  font-weight: 600;
+  color: #9b747b;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.tab.active {
+  color: #34252a;
+  background: #fffdfb;
+  box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.06);
+}
+.panel-scroll {
+  max-height: 62vh;
+  padding: 0 20rpx;
+}
+.section {
+  border-radius: 20rpx;
+  background: #fffdfb;
+  padding: 24rpx;
+  display: flex;
+  flex-direction: column;
+}
+.sec-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16rpx;
+}
+.sec-head text:first-child {
+  font-size: 27rpx;
+  font-weight: 700;
+  color: #34252a;
+}
+.sec-head text:last-child {
+  font-size: 24rpx;
+  color: #999;
+}
+.chip-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+.chip {
+  min-width: 72rpx;
+  height: 60rpx;
+  border-radius: 14rpx;
+  font-size: 25rpx;
+  font-weight: 700;
+  color: #8e5964;
+  background: #fff1ef;
+  padding: 0 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.chip.on {
+  color: #fff;
+  background: #d96b7c;
+}
+.row-field {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.row-field text {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: #34252a;
+}
+.pick-val {
+  font-size: 26rpx;
+  color: #b85265;
+  font-weight: 600;
+}
+.slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  margin-bottom: 8rpx;
+}
+.slider-row text {
+  font-size: 24rpx;
+  color: #7a6065;
+  font-weight: 500;
+}
+.color-row {
+  display: flex;
+  flex-direction: row;
+  gap: 14rpx;
+}
+.colorDot {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 16rpx;
+  border: 3rpx solid transparent;
+}
+.colorDot.on {
+  border-color: #d96b7c;
+}
+.panel-space {
+  height: calc(20rpx + env(safe-area-inset-bottom));
+}
+
+/* ====== 隐藏 canvas ====== */
+.hide-canvas {
+  position: fixed;
+  left: -9999rpx;
+  top: -9999rpx;
+  pointer-events: none;
+  opacity: 0;
+}
+</style>

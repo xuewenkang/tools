@@ -1,0 +1,223 @@
+<script lang="uts">
+export default {
+  data() {
+    return {
+      statusBarHeight: 44,
+    }
+  },
+  onShow() {
+    const sysInfo = uni.getSystemInfoSync()
+    this.statusBarHeight = (sysInfo.statusBarHeight as number) ?? 44
+  },
+  methods: {
+    goStudio() {
+      uni.navigateTo({ url: '/pages/studio/index' })
+    },
+  },
+}
+</script>
+
+<template>
+  <view class="container">
+    <!-- 顶部区域 -->
+    <view class="header" :style="{ paddingTop: statusBarHeight + 'px' }">
+      <view class="header-inner">
+        <text class="app-name">图片小工具</text>
+        <text class="app-desc">本地处理 · 快速出图</text>
+      </view>
+    </view>
+
+    <!-- 主内容 -->
+    <scroll-view scroll-y class="main-scroll">
+      <view class="intro">
+        <text class="intro-title">今天想拼哪组照片？</text>
+        <text class="intro-desc">打开工具后直接上传 预览和保存 没有多余步骤。</text>
+      </view>
+
+      <!-- 拼图入口卡片 -->
+      <view class="hero-card" @click="goStudio">
+        <view class="card-icon-area">
+          <text class="card-icon">⊞</text>
+        </view>
+        <view class="card-info">
+          <text class="card-title">批量拼图</text>
+          <text class="card-desc">宫格比例 · 圆角间距 · 高清保存</text>
+        </view>
+        <view class="card-arrow">
+          <text>›</text>
+        </view>
+      </view>
+
+      <view class="note-card">
+        <text class="note-title">隐私友好</text>
+        <text class="note-text">图片只在本机处理，导出后保存到系统相册。</text>
+      </view>
+
+      <view class="bottom-safe"></view>
+    </scroll-view>
+  </view>
+</template>
+
+<style>
+.container {
+  min-height: 100vh;
+  background: #fff8f6;
+}
+
+/* ====== 头部 ====== */
+.header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: #fff8f6;
+}
+
+.header-inner {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 32rpx 24rpx;
+}
+
+.app-name {
+  font-size: 34rpx;
+  font-weight: 800;
+  color: #34252a;
+}
+
+.app-desc {
+  font-size: 23rpx;
+  color: #9b747b;
+  font-weight: 500;
+}
+
+/* ====== 主滚动区 ====== */
+.main-scroll {
+  height: 100vh;
+  padding: 0 28rpx;
+  padding-top: 180rpx;
+}
+.intro {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  padding: 22rpx 4rpx 18rpx;
+}
+.intro-title {
+  font-size: 46rpx;
+  font-weight: 800;
+  color: #34252a;
+  line-height: 1.18;
+}
+.intro-desc {
+  font-size: 27rpx;
+  color: #9b747b;
+  line-height: 1.45;
+}
+
+/* ====== 拼图入口卡片 ====== */
+.hero-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-top: 24rpx;
+  padding: 36rpx 28rpx;
+  border-radius: 28rpx;
+  background: #fffdfb;
+  box-shadow: 0 14rpx 38rpx rgba(186, 116, 126, 0.12);
+  border: 1rpx solid rgba(216, 148, 154, 0.18);
+}
+
+.hero-card:active {
+  transform: scale(0.98);
+  opacity: 0.9;
+}
+
+.card-icon-area {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 26rpx;
+  background: #f5c7c9;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.card-icon {
+  font-size: 44rpx;
+  color: #8d3f52;
+  font-weight: 300;
+}
+
+.card-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  margin-left: 24rpx;
+}
+
+.card-title {
+  font-size: 32rpx;
+  font-weight: 800;
+  color: #34252a;
+}
+
+.card-desc {
+  font-size: 25rpx;
+  color: #9b747b;
+  font-weight: 500;
+}
+
+.card-arrow {
+  width: 52rpx;
+  height: 52rpx;
+  border-radius: 50%;
+  background: #fff0ef;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.card-arrow text {
+  font-size: 32rpx;
+  color: #b85265;
+  font-weight: 300;
+  line-height: 1;
+}
+
+/* ====== 提示文字 ====== */
+.note-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  margin-top: 28rpx;
+  padding: 28rpx;
+  border-radius: 24rpx;
+  background: #f2f7ef;
+}
+.note-title {
+  font-size: 28rpx;
+  color: #43634e;
+  font-weight: 800;
+}
+
+.note-text {
+  font-size: 25rpx;
+  color: #6f8173;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+/* ====== 底部间距 ====== */
+.bottom-safe {
+  height: 200rpx;
+}
+</style>

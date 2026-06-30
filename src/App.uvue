@@ -1,0 +1,46 @@
+<script lang="uts">
+export default {
+  onLaunch() {
+    console.log('工具集合 v1.0.0 launched')
+  },
+}
+</script>
+
+<style>
+page {
+  min-height: 100%;
+  color: #34252a;
+  background: #fff8f6;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "Helvetica Neue",
+    Helvetica,
+    Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+view,
+text,
+button,
+input,
+textarea,
+canvas {
+  box-sizing: border-box;
+}
+
+button {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  line-height: inherit;
+}
+
+button::after {
+  border: 0;
+}
+</style>

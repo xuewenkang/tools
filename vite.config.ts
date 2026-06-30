@@ -1,7 +1,8 @@
 import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
+import uniPlugin from '@dcloudio/vite-plugin-uni'
 
-// https://vite.dev/config/
+const uni = 'default' in uniPlugin ? uniPlugin.default : uniPlugin
+
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [uni()],
 })
