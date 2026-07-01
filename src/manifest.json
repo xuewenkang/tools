@@ -13,8 +13,14 @@
       "postcss": true,
       "minified": true
     },
+     "requiredPrivateInfos": [
+    "getLocation"
+  ],
     "usingComponents": true,
     "permission": {
+      "scope.userLocation": {
+        "desc": "用于获取当前位置并展示实时天气"
+      },
       "scope.writePhotosAlbum": {
         "desc": "用于保存导出的拼图图片到相册"
       }

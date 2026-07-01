@@ -1,0 +1,1286 @@
+<script lang="uts">
+type UserProfile = {
+  name: string
+  birthday: string
+  zodiac: string
+}
+
+function todayKey(): string {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = `${now.getMonth() + 1}`.padStart(2, '0')
+  const d = `${now.getDate()}`.padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function safeText(value: any): string {
+  if (value == null) return ''
+  return `${value}`.trim()
+}
+
+function pickSiliconFlowText(data: any): string {
+  return safeText(data?.choices?.[0]?.message?.content)
+}
+
+function zodiacFromBirthday(birthday: string): string {
+  const parts = birthday.split('-')
+  if (parts.length < 3) return '星座'
+  const month = Number(parts[1])
+  const day = Number(parts[2])
+  const value = month * 100 + day
+  if (value >= 321 && value <= 419) return '白羊座'
+  if (value >= 420 && value <= 520) return '金牛座'
+  if (value >= 521 && value <= 621) return '双子座'
+  if (value >= 622 && value <= 722) return '巨蟹座'
+  if (value >= 723 && value <= 822) return '狮子座'
+  if (value >= 823 && value <= 922) return '处女座'
+  if (value >= 923 && value <= 1023) return '天秤座'
+  if (value >= 1024 && value <= 1122) return '天蝎座'
+  if (value >= 1123 && value <= 1221) return '射手座'
+  if (value >= 1222 || value <= 119) return '摩羯座'
+  if (value >= 120 && value <= 218) return '水瓶座'
+  return '双鱼座'
+}
+
+function zodiacEnglish(zodiac: string): string {
+  if (zodiac == '白羊座') return 'Aries'
+  if (zodiac == '金牛座') return 'Taurus'
+  if (zodiac == '双子座') return 'Gemini'
+  if (zodiac == '巨蟹座') return 'Cancer'
+  if (zodiac == '狮子座') return 'Leo'
+  if (zodiac == '处女座') return 'Virgo'
+  if (zodiac == '天秤座') return 'Libra'
+  if (zodiac == '天蝎座') return 'Scorpio'
+  if (zodiac == '射手座') return 'Sagittarius'
+  if (zodiac == '摩羯座') return 'Capricorn'
+  if (zodiac == '水瓶座') return 'Aquarius'
+  if (zodiac == '双鱼座') return 'Pisces'
+  return 'Zodiac'
+}
+
+export default {
+  data() {
+    return {
+      statusBarHeight: 44,
+      dayKey: todayKey(),
+      profileName: '',
+      profileBirthday: '',
+      profileZodiac: '',
+      zodiacEn: 'Zodiac',
+      isDrawing: false,
+      fortuneDrawn: false,
+      ritualTextIndex: 0,
+      fortuneText: '',
+      fortuneGood: '整理心情',
+      fortuneAvoid: '过度内耗',
+      fortuneColor: '月光金',
+      rarity: 'rare',
+      rarityLabel: '稀有',
+      luckyNumber: '7',
+      energyIndex: '86',
+      luckStars: '★★★★☆',
+      ritualTexts: [
+        '✨ 正在连接星辰...',
+        '🌙 正在解析今日命运...',
+        '💖 宇宙正在回应你...',
+        '⭐ 正在抽取属于你的星卡...',
+      ] as string[],
+    }
+  },
+  onShow() {
+    const sysInfo = uni.getSystemInfoSync()
+    this.statusBarHeight = (sysInfo.statusBarHeight as number) ?? 44
+    this.loadUserProfile()
+  },
+  methods: {
+    loadUserProfile() {
+      const saved = uni.getStorageSync('userProfile') as any
+      const name = safeText(saved?.name)
+      const birthday = safeText(saved?.birthday)
+      if (name.length == 0 || birthday.length == 0) {
+        this.profileName = ''
+        this.profileBirthday = ''
+        this.profileZodiac = ''
+        this.zodiacEn = 'Zodiac'
+        return
+      }
+      this.profileName = name
+      this.profileBirthday = birthday
+      this.profileZodiac = safeText(saved?.zodiac)
+      if (this.profileZodiac.length == 0) this.profileZodiac = zodiacFromBirthday(birthday)
+      this.zodiacEn = zodiacEnglish(this.profileZodiac)
+      this.loadCachedFortune()
+    },
+    getSiliconFlowKey(): string {
+      const key = uni.getStorageSync('siliconFlowApiKey')
+      return safeText(key)
+    },
+    drawFortune() {
+      if (this.isDrawing) return
+      if (this.profileZodiac.length == 0) {
+        uni.showToast({ title: '先到设置里填写名字和生日', icon: 'none' })
+        return
+      }
+      const cachedKey = `daily_fortune_${this.dayKey}_${this.profileZodiac}`
+      const cached = safeText(uni.getStorageSync(cachedKey))
+      if (cached.length > 0) {
+        this.playRitual(cached)
+        return
+      }
+      const key = this.getSiliconFlowKey()
+      if (key.length == 0) {
+        uni.showToast({ title: '请先在设置中填写硅基流动 Key', icon: 'none' })
+        return
+      }
+      this.startRitual()
+      this.callSiliconFlow(
+        key,
+        `请为${this.profileName}生成${this.dayKey}${this.profileZodiac}今日星座运势。输出4行：运势：一句温柔准确的分析；宜：一个具体行动；不宜：一个具体避免事项；幸运色：一个颜色。不要表情符号。`,
+        (text: string) => {
+          uni.setStorageSync(cachedKey, text)
+          setTimeout(() => {
+            this.finishRitual(text)
+          }, 2200)
+        },
+        () => {
+          this.isDrawing = false
+          uni.showToast({ title: '星辰暂时失联了', icon: 'none' })
+        },
+        180,
+        0.8,
+      )
+    },
+    startRitual() {
+      this.isDrawing = true
+      this.ritualTextIndex = 0
+      setTimeout(() => { if (this.isDrawing) this.ritualTextIndex = 1 }, 1000)
+      setTimeout(() => { if (this.isDrawing) this.ritualTextIndex = 2 }, 2000)
+      setTimeout(() => { if (this.isDrawing) this.ritualTextIndex = 3 }, 3000)
+      setTimeout(() => { if (this.isDrawing) this.ritualTextIndex = 0 }, 4000)
+    },
+    playRitual(text: string) {
+      this.startRitual()
+      setTimeout(() => {
+        this.finishRitual(text)
+      }, 2600)
+    },
+    finishRitual(text: string) {
+      this.isDrawing = false
+      this.applyFortune(text)
+    },
+    loadCachedFortune() {
+      if (this.profileZodiac.length == 0) return
+      const cachedKey = `daily_fortune_${this.dayKey}_${this.profileZodiac}`
+      const cached = safeText(uni.getStorageSync(cachedKey))
+      if (cached.length > 0) this.applyFortune(cached)
+    },
+    applyFortune(text: string) {
+      this.fortuneText = text
+      this.fortuneDrawn = true
+      const lines = text.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
+        if (line.indexOf('宜') >= 0 && line.indexOf('不宜') < 0) this.fortuneGood = line.replace('宜：', '').replace('宜:', '').trim()
+        if (line.indexOf('不宜') >= 0) this.fortuneAvoid = line.replace('不宜：', '').replace('不宜:', '').trim()
+        if (line.indexOf('幸运色') >= 0) this.fortuneColor = line.replace('幸运色：', '').replace('幸运色:', '').trim()
+      }
+      this.luckyNumber = `${(this.dayKey.length + this.profileZodiac.length + this.profileName.length) % 9 + 1}`
+      this.energyIndex = `${82 + ((this.profileZodiac.length + this.profileName.length) % 14)}`
+      this.rarity = this.energyIndex >= '92' ? 'legend' : this.energyIndex >= '88' ? 'epic' : 'rare'
+      this.rarityLabel = this.rarity == 'legend' ? '传说' : this.rarity == 'epic' ? '史诗' : '稀有'
+      this.luckStars = this.rarity == 'legend' ? '★★★★★' : this.rarity == 'epic' ? '★★★★☆' : '★★★☆☆'
+    },
+    callSiliconFlow(key: string, prompt: string, successCb: (text: string) => void, failCb: () => void, maxTokens: number = 256, temperature: number = 0.7) {
+      uni.request({
+        url: 'https://api.siliconflow.cn/v1/chat/completions',
+        method: 'POST',
+        timeout: 30000,
+        header: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${key}`,
+        },
+        data: {
+          model: 'deepseek-ai/DeepSeek-V4-Pro',
+          messages: [
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+          temperature,
+          max_tokens: maxTokens,
+        },
+        success: (res) => {
+          const data = res.data as any
+          if (res.statusCode == 429) {
+            uni.showToast({ title: '今日免费额度暂不可用', icon: 'none' })
+            failCb()
+            return
+          }
+          const text = pickSiliconFlowText(data)
+          if (text.length == 0) {
+            failCb()
+            return
+          }
+          successCb(text)
+        },
+        fail: () => {
+          failCb()
+        },
+      })
+    },
+  },
+}
+</script>
+
+<template>
+  <view class="page" :class="rarity">
+    <view class="aurora aurora-one"></view>
+    <view class="aurora aurora-two"></view>
+    <view class="bokeh bokeh-one"></view>
+    <view class="bokeh bokeh-two"></view>
+    <view class="bokeh bokeh-three"></view>
+    <view class="cloud cloud-left"></view>
+    <view class="cloud cloud-right"></view>
+    <view class="meteor meteor-one"></view>
+    <view class="meteor meteor-two"></view>
+    <view class="star-field">
+      <view class="star s1"></view>
+      <view class="star s2"></view>
+      <view class="star s3"></view>
+      <view class="star s4"></view>
+      <view class="star s5"></view>
+      <view class="star s6"></view>
+      <view class="star s7"></view>
+      <view class="star s8"></view>
+    </view>
+
+    <view class="nav" :style="{ paddingTop: statusBarHeight + 'px' }">
+      <text class="nav-title">{{ fortuneDrawn ? '我的星卡' : '星卡抽取' }}</text>
+      <text class="nav-subtitle">Galaxy Tarot · 今天的星象结引，专属于你的星辰礼物</text>
+    </view>
+
+    <scroll-view scroll-y class="scroll">
+      <view class="hero">
+        <view class="tarot-shell">
+          <view class="tarot-card" :class="{ revealed: fortuneDrawn, drawing: isDrawing }">
+            <view class="card-glass"></view>
+            <view class="card-shimmer"></view>
+            <view class="corner-star corner-tl"></view>
+            <view class="corner-star corner-tr"></view>
+            <view class="corner-star corner-bl"></view>
+            <view class="corner-star corner-br"></view>
+            <view class="moon"></view>
+            <view class="sun"></view>
+            <view class="magic-ring ring-one"></view>
+            <view class="magic-ring ring-two"></view>
+            <view class="magic-ring ring-three"></view>
+            <view class="zodiac-wheel">
+              <view class="wheel-line line-a"></view>
+              <view class="wheel-line line-b"></view>
+              <view class="wheel-line line-c"></view>
+              <view class="wheel-dot dot-a"></view>
+              <view class="wheel-dot dot-b"></view>
+              <view class="wheel-dot dot-c"></view>
+              <view class="crystal"><text>{{ profileZodiac.length > 0 ? profileZodiac.slice(0, 1) : '星' }}</text></view>
+            </view>
+            <view class="card-caption">
+              <text>{{ fortuneDrawn ? profileZodiac : 'PINK TAROT' }}</text>
+              <text>{{ fortuneDrawn ? zodiacEn : 'Touch the starlight' }}</text>
+            </view>
+          </view>
+        </view>
+
+        <button class="draw-button" @click="drawFortune">
+          <view class="button-ripple"></view>
+          <text>{{ isDrawing ? '正在解析今日命运' : fortuneDrawn ? '再次查看今日星卡' : '✦ 抽取今日星卡' }}</text>
+        </button>
+        <text class="hint-text">点击卡牌开启命运指引</text>
+      </view>
+
+      <view v-if="fortuneDrawn" class="result-layout">
+        <view class="result-card" :class="rarity">
+          <view class="result-glow"></view>
+          <view class="result-frame"></view>
+          <text class="congrats">恭喜你</text>
+          <text class="result-title">{{ profileZodiac }}</text>
+          <text class="result-en">{{ zodiacEn }}</text>
+          <text class="rating">{{ luckStars }}</text>
+          <view class="result-oracle">
+            <view class="oracle-ring"></view>
+            <view class="oracle-moon moon-left"></view>
+            <view class="oracle-moon moon-right"></view>
+          </view>
+          <text class="theme-text">{{ fortuneText }}</text>
+          <view class="quick-grid">
+            <view><text>幸运色</text><text>{{ fortuneColor }}</text></view>
+            <view><text>幸运数字</text><text>{{ luckyNumber }}</text></view>
+            <view><text>能量指数</text><text>{{ energyIndex }}%</text></view>
+            <view><text>幸运指数</text><text>{{ luckStars }}</text></view>
+          </view>
+        </view>
+
+        <view class="module-grid">
+          <view class="module module-1"><view class="module-icon">✦</view><view><text>今日关键词</text><text>{{ fortuneGood }}</text></view></view>
+          <view class="module module-2"><view class="module-icon">♡</view><view><text>爱情运势</text><text>把话说柔软，靠近会更自然。</text></view></view>
+          <view class="module module-3"><view class="module-icon">▣</view><view><text>事业运势</text><text>{{ fortuneGood }}</text></view></view>
+          <view class="module module-4"><view class="module-icon">◌</view><view><text>财运分析</text><text>适合稳住节奏，少做冲动选择。</text></view></view>
+          <view class="module module-5"><view class="module-icon">●</view><view><text>幸运颜色</text><text>{{ fortuneColor }}</text></view></view>
+          <view class="module module-6"><view class="module-icon">3</view><view><text>幸运数字</text><text>{{ luckyNumber }}</text></view></view>
+          <view class="module module-7"><view class="module-icon">☾</view><view><text>今日建议</text><text>{{ fortuneGood }}</text></view></view>
+          <view class="module module-8"><view class="module-icon">♡</view><view><text>心灵寄语</text><text>愿你的温柔被世界温柔以待，所有美好都会如期而至。</text></view></view>
+        </view>
+      </view>
+
+      <view class="bottom-safe"></view>
+    </scroll-view>
+
+    <view v-if="isDrawing" class="ritual-mask">
+      <view class="ritual-aurora"></view>
+      <view class="ritual-flash"></view>
+      <view class="petal p1"></view>
+      <view class="petal p2"></view>
+      <view class="petal p3"></view>
+      <view class="petal p4"></view>
+      <view class="ritual-stage">
+        <view class="ritual-ring ritual-ring-a"></view>
+        <view class="ritual-ring ritual-ring-b"></view>
+        <view class="ritual-ring ritual-ring-c"></view>
+        <view class="energy-line energy-a"></view>
+        <view class="energy-line energy-b"></view>
+        <view class="ritual-card">
+          <view class="ritual-card-face">
+            <view class="ritual-symbol"></view>
+            <text>{{ profileZodiac.length > 0 ? profileZodiac.slice(0, 1) : '星' }}</text>
+          </view>
+        </view>
+      </view>
+      <text class="ritual-text">{{ ritualTexts[ritualTextIndex] }}</text>
+      <text class="ritual-subtext">宇宙正在回应你的召唤...</text>
+      <view class="ritual-dots"><text>•</text><text>•</text><text>•</text></view>
+    </view>
+  </view>
+</template>
+
+<style>
+.page {
+  min-height: 100vh;
+  color: #3b3555;
+  background: linear-gradient(180deg, #ffeaf5 0%, #f8eeff 52%, #fff8fd 100%);
+  overflow: hidden;
+}
+
+.aurora,
+.bokeh,
+.cloud,
+.meteor,
+.star-field {
+  position: fixed;
+  pointer-events: none;
+}
+
+.aurora {
+  width: 760rpx;
+  height: 520rpx;
+  border-radius: 50%;
+  filter: blur(28rpx);
+  opacity: 0.46;
+  transform: translate3d(0, 0, 0);
+  animation: auroraFlow 18s ease-in-out infinite;
+}
+
+.aurora-one {
+  left: -220rpx;
+  top: 80rpx;
+  background: linear-gradient(135deg, rgba(255, 184, 232, 0.74), rgba(231, 198, 255, 0.40), rgba(255, 255, 255, 0));
+}
+
+.aurora-two {
+  right: -260rpx;
+  top: 360rpx;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0), rgba(196, 167, 255, 0.34), rgba(255, 198, 226, 0.52));
+  animation-delay: 5s;
+}
+
+.bokeh {
+  border-radius: 50%;
+  filter: blur(8rpx);
+  background: rgba(255, 255, 255, 0.64);
+  animation: bokehFloat 16s ease-in-out infinite;
+}
+
+.bokeh-one { left: 42rpx; top: 220rpx; width: 168rpx; height: 168rpx; }
+.bokeh-two { right: 28rpx; top: 520rpx; width: 220rpx; height: 220rpx; animation-delay: 3s; }
+.bokeh-three { left: 210rpx; bottom: 160rpx; width: 132rpx; height: 132rpx; animation-delay: 6s; }
+
+.cloud {
+  width: 440rpx;
+  height: 120rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.42);
+  filter: blur(16rpx);
+  bottom: 86rpx;
+  animation: cloudFloat 20s ease-in-out infinite;
+}
+
+.cloud-left { left: -100rpx; }
+.cloud-right { right: -130rpx; bottom: 126rpx; animation-delay: 4s; }
+
+.star-field {
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+}
+
+.star {
+  position: absolute;
+  width: 8rpx;
+  height: 8rpx;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 22rpx rgba(255, 255, 255, 0.96), 0 0 42rpx rgba(255, 184, 232, 0.50);
+  animation: starTwinkle 4.8s ease-in-out infinite;
+}
+
+.s1 { left: 72rpx; top: 166rpx; }
+.s2 { right: 108rpx; top: 232rpx; animation-delay: 700ms; }
+.s3 { left: 180rpx; top: 462rpx; animation-delay: 1.2s; }
+.s4 { right: 64rpx; top: 662rpx; animation-delay: 1.9s; }
+.s5 { left: 90rpx; bottom: 296rpx; animation-delay: 2.4s; }
+.s6 { right: 210rpx; bottom: 196rpx; animation-delay: 3s; }
+.s7 { left: 330rpx; top: 118rpx; animation-delay: 3.6s; }
+.s8 { right: 300rpx; bottom: 430rpx; animation-delay: 4.1s; }
+
+.meteor {
+  width: 180rpx;
+  height: 3rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.96));
+  opacity: 0;
+  transform: rotate(-25deg);
+  animation: meteorFly 11s ease-in-out infinite;
+}
+
+.meteor-one { right: -80rpx; top: 260rpx; }
+.meteor-two { right: -130rpx; top: 620rpx; animation-delay: 5.2s; }
+
+.nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 20;
+  padding: 22rpx 32rpx 18rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: linear-gradient(180deg, rgba(255, 234, 245, 0.88), rgba(255, 234, 245, 0));
+}
+
+.nav-title {
+  color: #ffffff;
+  font-size: 44rpx;
+  font-weight: 900;
+  text-shadow: 0 4rpx 24rpx rgba(191, 92, 154, 0.28);
+}
+
+.nav-subtitle {
+  margin-top: 8rpx;
+  color: rgba(116, 106, 149, 0.72);
+  font-size: 23rpx;
+  font-weight: 500;
+  text-align: center;
+}
+
+.scroll {
+  position: relative;
+  z-index: 5;
+  height: 100vh;
+  padding: 188rpx 32rpx 0;
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tarot-shell {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  transform: translate3d(0, 0, 0);
+}
+
+.tarot-card {
+  position: relative;
+  width: 72vw;
+  height: 600rpx;
+  max-width: 540rpx;
+  border-radius: 36rpx;
+  overflow: hidden;
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.42), rgba(231, 198, 255, 0.32) 44%, rgba(255, 184, 232, 0.34));
+  border: 3rpx solid rgba(255, 255, 255, 0.62);
+  box-shadow: 0 30rpx 90rpx rgba(214, 118, 184, 0.24), 0 0 60rpx rgba(255, 255, 255, 0.58), inset 0 0 40rpx rgba(255, 255, 255, 0.28);
+  transform: translate3d(0, 0, 0);
+  animation: cardFloat 4s ease-in-out infinite;
+}
+
+.tarot-card::before {
+  content: '';
+  position: absolute;
+  inset: 12rpx;
+  border-radius: 28rpx;
+  border: 2rpx solid rgba(255, 219, 173, 0.62);
+  box-shadow: inset 0 0 24rpx rgba(255, 255, 255, 0.42);
+}
+
+.tarot-card.drawing {
+  animation: cardInvoke 1.2s cubic-bezier(.2,.8,.2,1) infinite;
+}
+
+.tarot-card.revealed {
+  animation: cardReveal 700ms cubic-bezier(.18,.9,.22,1.2) both, cardFloat 4s ease-in-out 700ms infinite;
+}
+
+.card-glass {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 35% 16%, rgba(255, 255, 255, 0.72), transparent 26%), radial-gradient(circle at 70% 70%, rgba(255, 184, 232, 0.42), transparent 34%);
+}
+
+.card-shimmer {
+  position: absolute;
+  left: -140rpx;
+  top: 0;
+  width: 104rpx;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.74), transparent);
+  transform: skewX(-18deg);
+  animation: shimmer 5s ease-in-out infinite;
+}
+
+.corner-star {
+  position: absolute;
+  width: 30rpx;
+  height: 30rpx;
+  z-index: 2;
+}
+
+.corner-star::before,
+.corner-star::after {
+  content: '';
+  position: absolute;
+  left: 13rpx;
+  top: 0;
+  width: 4rpx;
+  height: 30rpx;
+  border-radius: 999rpx;
+  background: #fff1b8;
+  box-shadow: 0 0 18rpx rgba(255, 241, 184, 0.82);
+}
+
+.corner-star::after {
+  transform: rotate(90deg);
+}
+
+.corner-tl { left: 42rpx; top: 42rpx; }
+.corner-tr { right: 42rpx; top: 42rpx; }
+.corner-bl { left: 42rpx; bottom: 42rpx; }
+.corner-br { right: 42rpx; bottom: 42rpx; }
+
+.moon {
+  position: absolute;
+  left: 50%;
+  top: 72rpx;
+  width: 56rpx;
+  height: 56rpx;
+  margin-left: -28rpx;
+  border-radius: 50%;
+  background: #fff1b8;
+  box-shadow: 0 0 36rpx rgba(255, 241, 184, 0.68);
+}
+
+.moon::after {
+  content: '';
+  position: absolute;
+  left: 18rpx;
+  top: 0;
+  width: 54rpx;
+  height: 54rpx;
+  border-radius: 50%;
+  background: rgba(215, 149, 219, 0.86);
+}
+
+.sun {
+  position: absolute;
+  left: 50%;
+  bottom: 78rpx;
+  width: 54rpx;
+  height: 54rpx;
+  margin-left: -27rpx;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff8dc, #ffc6df);
+  box-shadow: 0 0 34rpx rgba(255, 198, 223, 0.72);
+}
+
+.magic-ring {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  border-radius: 50%;
+  border: 2rpx solid rgba(255, 241, 184, 0.34);
+  transform: translate(-50%, -50%);
+}
+
+.ring-one {
+  width: 360rpx;
+  height: 360rpx;
+  animation: ringRotate 24s linear infinite;
+}
+
+.ring-two {
+  width: 260rpx;
+  height: 260rpx;
+  border-color: rgba(255, 255, 255, 0.42);
+  animation: ringRotateReverse 18s linear infinite;
+}
+
+.ring-three {
+  width: 188rpx;
+  height: 188rpx;
+  border-color: rgba(255, 184, 232, 0.42);
+  animation: energyBreath 3s ease-in-out infinite;
+}
+
+.zodiac-wheel {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  width: 360rpx;
+  height: 360rpx;
+  margin-left: -180rpx;
+  margin-top: -180rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wheel-line {
+  position: absolute;
+  width: 280rpx;
+  height: 2rpx;
+  background: rgba(255, 241, 184, 0.34);
+}
+
+.line-a { transform: rotate(0deg); }
+.line-b { transform: rotate(60deg); }
+.line-c { transform: rotate(120deg); }
+
+.wheel-dot {
+  position: absolute;
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: #fff1b8;
+  box-shadow: 0 0 22rpx rgba(255, 241, 184, 0.90);
+  animation: starTwinkle 4s ease-in-out infinite;
+}
+
+.dot-a { top: 54rpx; left: 174rpx; }
+.dot-b { right: 62rpx; top: 196rpx; animation-delay: 1.2s; }
+.dot-c { left: 74rpx; bottom: 74rpx; animation-delay: 2.4s; }
+
+.crystal {
+  position: relative;
+  width: 132rpx;
+  height: 132rpx;
+  border-radius: 42rpx;
+  background: radial-gradient(circle, #fff8fd, #ffb8e8 48%, #b795ff 100%);
+  box-shadow: 0 0 54rpx rgba(255, 184, 232, 0.82), inset 0 0 24rpx rgba(255, 255, 255, 0.58);
+  transform: rotate(45deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: energyBreath 3.2s ease-in-out infinite;
+}
+
+.crystal text {
+  transform: rotate(-45deg);
+  color: #ffffff;
+  font-size: 48rpx;
+  font-weight: 900;
+  text-shadow: 0 4rpx 16rpx rgba(155, 89, 176, 0.34);
+}
+
+.card-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 148rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 2;
+}
+
+.card-caption text:first-child {
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 900;
+  text-shadow: 0 4rpx 16rpx rgba(155, 89, 176, 0.32);
+}
+
+.card-caption text:last-child {
+  margin-top: 8rpx;
+  color: rgba(116, 106, 149, 0.72);
+  font-size: 22rpx;
+}
+
+.draw-button {
+  position: relative;
+  width: 430rpx;
+  height: 96rpx;
+  margin-top: 40rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(135deg, #ffb8e8, #e7c6ff);
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 20rpx 56rpx rgba(223, 124, 202, 0.32), inset 0 2rpx 0 rgba(255, 255, 255, 0.44);
+  overflow: hidden;
+  animation: buttonBreath 3s ease-in-out infinite;
+}
+
+.draw-button:active {
+  transform: scale(0.96);
+}
+
+.button-ripple {
+  position: absolute;
+  left: -30rpx;
+  right: -30rpx;
+  top: -30rpx;
+  bottom: -30rpx;
+  border-radius: 999rpx;
+  border: 2rpx solid rgba(255, 255, 255, 0.46);
+  animation: auraExpand 2.6s ease-in-out infinite;
+}
+
+.hint-text {
+  margin-top: 22rpx;
+  color: rgba(116, 106, 149, 0.58);
+  font-size: 23rpx;
+}
+
+.result-layout {
+  margin-top: 34rpx;
+  animation: resultAppear 700ms cubic-bezier(.18,.9,.22,1.2) both;
+}
+
+.result-card {
+  position: relative;
+  min-height: 760rpx;
+  padding: 38rpx 30rpx 30rpx;
+  border-radius: 38rpx;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.32);
+  border: 1rpx solid rgba(255, 255, 255, 0.68);
+  box-shadow: 0 26rpx 76rpx rgba(220, 132, 190, 0.22), inset 0 0 34rpx rgba(255, 255, 255, 0.34);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.result-glow {
+  position: absolute;
+  left: -80rpx;
+  top: -90rpx;
+  width: 280rpx;
+  height: 280rpx;
+  border-radius: 50%;
+  background: rgba(255, 184, 232, 0.34);
+  filter: blur(10rpx);
+}
+
+.result-frame {
+  position: absolute;
+  inset: 18rpx;
+  border-radius: 30rpx;
+  border: 2rpx solid rgba(255, 219, 173, 0.42);
+}
+
+.congrats {
+  position: relative;
+  z-index: 2;
+  color: #ffffff;
+  font-size: 34rpx;
+  font-weight: 900;
+  text-shadow: 0 4rpx 18rpx rgba(191, 92, 154, 0.32);
+}
+
+.result-title {
+  position: relative;
+  z-index: 2;
+  margin-top: 42rpx;
+  color: #8d4f93;
+  font-size: 46rpx;
+  font-weight: 900;
+}
+
+.result-en {
+  position: relative;
+  z-index: 2;
+  margin-top: 6rpx;
+  color: #746a95;
+  font-size: 25rpx;
+  font-weight: 500;
+}
+
+.rating {
+  position: relative;
+  z-index: 2;
+  margin-top: 12rpx;
+  color: #ffc463;
+  font-size: 28rpx;
+  letter-spacing: 0;
+}
+
+.result-oracle {
+  position: relative;
+  z-index: 2;
+  width: 360rpx;
+  height: 330rpx;
+  margin-top: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.oracle-ring {
+  position: absolute;
+  width: 300rpx;
+  height: 300rpx;
+  border-radius: 50%;
+  border: 2rpx solid rgba(255, 219, 173, 0.44);
+  box-shadow: 0 0 36rpx rgba(255, 241, 184, 0.32);
+  animation: ringRotate 26s linear infinite;
+}
+
+.oracle-moon {
+  position: absolute;
+  width: 132rpx;
+  height: 196rpx;
+  border-radius: 80rpx 80rpx 80rpx 80rpx;
+  background: linear-gradient(160deg, #fff4d1, #f5b6d7);
+  box-shadow: 0 0 30rpx rgba(255, 216, 170, 0.54);
+}
+
+.moon-left {
+  left: 78rpx;
+  transform: rotate(28deg);
+}
+
+.moon-right {
+  right: 78rpx;
+  transform: rotate(208deg);
+}
+
+.theme-text {
+  position: relative;
+  z-index: 2;
+  margin-top: 8rpx;
+  padding: 18rpx 24rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.34);
+  color: #746a95;
+  font-size: 24rpx;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.quick-grid {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  margin-top: 26rpx;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 14rpx;
+}
+
+.quick-grid view {
+  width: calc(50% - 7rpx);
+  min-height: 84rpx;
+  border-radius: 22rpx;
+  background: rgba(255, 255, 255, 0.34);
+  border: 1rpx solid rgba(255, 255, 255, 0.58);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 20rpx;
+}
+
+.quick-grid text:first-child {
+  color: #9a76a3;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+
+.quick-grid text:last-child {
+  margin-top: 6rpx;
+  color: #3b3555;
+  font-size: 25rpx;
+  font-weight: 900;
+}
+
+.module-grid {
+  margin-top: 24rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.module {
+  min-height: 126rpx;
+  padding: 22rpx;
+  border-radius: 32rpx;
+  background: rgba(255, 255, 255, 0.34);
+  border: 1rpx solid rgba(255, 255, 255, 0.70);
+  box-shadow: 0 16rpx 42rpx rgba(220, 132, 190, 0.13);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 18rpx;
+  animation: moduleIn 520ms ease-out both;
+}
+
+.module-icon {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.58);
+  color: #f090bf;
+  font-size: 30rpx;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 0 18rpx rgba(255, 255, 255, 0.44);
+  flex-shrink: 0;
+}
+
+.module view:last-child {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.module text:first-child {
+  color: #3b3555;
+  font-size: 27rpx;
+  font-weight: 900;
+}
+
+.module text:last-child {
+  color: #746a95;
+  font-size: 24rpx;
+  line-height: 1.45;
+}
+
+.module-2 { animation-delay: 150ms; }
+.module-3 { animation-delay: 300ms; }
+.module-4 { animation-delay: 450ms; }
+.module-5 { animation-delay: 600ms; }
+.module-6 { animation-delay: 750ms; }
+.module-7 { animation-delay: 900ms; }
+.module-8 { animation-delay: 1050ms; }
+
+.bottom-safe {
+  height: 190rpx;
+}
+
+.ritual-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 100;
+  background: linear-gradient(180deg, rgba(82, 42, 107, 0.86), rgba(255, 184, 232, 0.72));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.ritual-aurora {
+  position: absolute;
+  width: 920rpx;
+  height: 740rpx;
+  border-radius: 50%;
+  background: conic-gradient(from 30deg, rgba(255, 184, 232, 0.0), rgba(255, 184, 232, 0.72), rgba(231, 198, 255, 0.70), rgba(255, 255, 255, 0.62), rgba(255, 184, 232, 0.0));
+  filter: blur(18rpx);
+  animation: ritualAurora 6s ease-in-out infinite;
+}
+
+.ritual-flash {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0);
+  animation: ritualFlash 6s ease-in-out infinite;
+}
+
+.petal {
+  position: absolute;
+  width: 28rpx;
+  height: 18rpx;
+  border-radius: 28rpx 0 28rpx 0;
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: 0 0 20rpx rgba(255, 255, 255, 0.66);
+  animation: petalBurst 4.4s ease-in-out infinite;
+}
+
+.p1 { left: 120rpx; top: 300rpx; }
+.p2 { right: 92rpx; top: 420rpx; animation-delay: 800ms; }
+.p3 { left: 180rpx; bottom: 320rpx; animation-delay: 1.5s; }
+.p4 { right: 190rpx; bottom: 250rpx; animation-delay: 2.1s; }
+
+.ritual-stage {
+  position: relative;
+  width: 580rpx;
+  height: 580rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ritual-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 2rpx solid rgba(255, 255, 255, 0.54);
+  box-shadow: 0 0 34rpx rgba(255, 255, 255, 0.34);
+}
+
+.ritual-ring-a {
+  width: 520rpx;
+  height: 520rpx;
+  animation: ringRotate 5.6s linear infinite;
+}
+
+.ritual-ring-b {
+  width: 390rpx;
+  height: 390rpx;
+  border-color: rgba(255, 241, 184, 0.56);
+  animation: ringRotateReverse 4.2s linear infinite;
+}
+
+.ritual-ring-c {
+  width: 260rpx;
+  height: 260rpx;
+  border-color: rgba(231, 198, 255, 0.70);
+  animation: energyBreath 1.8s ease-in-out infinite;
+}
+
+.energy-line {
+  position: absolute;
+  width: 620rpx;
+  height: 4rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.88), transparent);
+  animation: energySweep 2s ease-in-out infinite;
+}
+
+.energy-b {
+  transform: rotate(78deg);
+  animation-delay: 340ms;
+}
+
+.ritual-card {
+  position: relative;
+  width: 230rpx;
+  height: 382rpx;
+  border-radius: 28rpx;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.58), rgba(231, 198, 255, 0.42));
+  border: 2rpx solid rgba(255, 255, 255, 0.72);
+  box-shadow: 0 0 80rpx rgba(255, 184, 232, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: ritualCardFlip 1.8s ease-in-out infinite;
+}
+
+.ritual-card-face {
+  width: 150rpx;
+  height: 150rpx;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff8fd, #ffb8e8 58%, #e7c6ff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 60rpx rgba(255, 255, 255, 0.70);
+}
+
+.ritual-card-face text {
+  color: #ffffff;
+  font-size: 54rpx;
+  font-weight: 900;
+}
+
+.ritual-text {
+  margin-top: 32rpx;
+  color: #ffffff;
+  font-size: 32rpx;
+  font-weight: 900;
+  text-shadow: 0 4rpx 24rpx rgba(155, 89, 176, 0.42);
+  animation: textFade 1s ease-in-out infinite;
+}
+
+.ritual-subtext {
+  margin-top: 14rpx;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 24rpx;
+}
+
+.ritual-dots {
+  margin-top: 22rpx;
+  display: flex;
+  flex-direction: row;
+  gap: 10rpx;
+}
+
+.ritual-dots text {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 30rpx;
+  animation: starTwinkle 1.6s ease-in-out infinite;
+}
+
+.ritual-dots text:nth-child(2) { animation-delay: 260ms; }
+.ritual-dots text:nth-child(3) { animation-delay: 520ms; }
+
+@keyframes auroraFlow {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.42; }
+  50% { transform: translate3d(44rpx, -32rpx, 0) scale(1.08); opacity: 0.64; }
+}
+
+@keyframes bokehFloat {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.48; }
+  50% { transform: translate3d(22rpx, -30rpx, 0) scale(1.08); opacity: 0.76; }
+}
+
+@keyframes cloudFloat {
+  0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.45; }
+  50% { transform: translate3d(58rpx, -12rpx, 0); opacity: 0.68; }
+}
+
+@keyframes starTwinkle {
+  0%, 100% { opacity: 0.34; transform: scale(0.76); }
+  50% { opacity: 1; transform: scale(1.16); }
+}
+
+@keyframes meteorFly {
+  0%, 74%, 100% { opacity: 0; transform: translate3d(0, 0, 0) rotate(-25deg); }
+  80% { opacity: 0.9; }
+  90% { opacity: 0; transform: translate3d(-680rpx, 320rpx, 0) rotate(-25deg); }
+}
+
+@keyframes cardFloat {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(-1.5deg); }
+  50% { transform: translate3d(0, -24rpx, 0) rotate(1.5deg); }
+}
+
+@keyframes cardInvoke {
+  0% { transform: translate3d(0, -8rpx, 0) scale(1) rotateY(0deg); }
+  38% { transform: translate3d(0, -12rpx, 0) scale(0.95) rotateY(8deg); }
+  100% { transform: translate3d(0, -28rpx, 0) scale(1.08) rotateY(26deg); }
+}
+
+@keyframes cardReveal {
+  0% { opacity: 0; transform: translate3d(0, 80rpx, 0) scale(0); }
+  70% { opacity: 1; transform: translate3d(0, -12rpx, 0) scale(1.08); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes shimmer {
+  0%, 68% { transform: translateX(0) skewX(-18deg); opacity: 0; }
+  78% { opacity: 1; }
+  100% { transform: translateX(720rpx) skewX(-18deg); opacity: 0; }
+}
+
+@keyframes ringRotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes ringRotateReverse {
+  0% { transform: rotate(360deg); }
+  100% { transform: rotate(0deg); }
+}
+
+@keyframes energyBreath {
+  0%, 100% { opacity: 0.58; transform: translate(-50%, -50%) scale(0.96); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+}
+
+@keyframes buttonBreath {
+  0%, 100% { box-shadow: 0 20rpx 56rpx rgba(223, 124, 202, 0.28), inset 0 2rpx 0 rgba(255, 255, 255, 0.44); }
+  50% { box-shadow: 0 24rpx 74rpx rgba(223, 124, 202, 0.48), inset 0 2rpx 0 rgba(255, 255, 255, 0.58); }
+}
+
+@keyframes auraExpand {
+  0%, 100% { transform: scale(0.94); opacity: 0.28; }
+  50% { transform: scale(1.06); opacity: 0.62; }
+}
+
+@keyframes resultAppear {
+  0% { opacity: 0; transform: translate3d(0, 80rpx, 0) scale(0.4); }
+  70% { opacity: 1; transform: translate3d(0, -10rpx, 0) scale(1.04); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes moduleIn {
+  0% { opacity: 0; transform: translate3d(0, 30rpx, 0); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes ritualAurora {
+  0%, 100% { transform: rotate(0deg) scale(0.96); opacity: 0.54; }
+  50% { transform: rotate(18deg) scale(1.08); opacity: 0.84; }
+}
+
+@keyframes ritualFlash {
+  0%, 72%, 100% { background: rgba(255, 255, 255, 0); }
+  78% { background: rgba(255, 255, 255, 0.90); }
+  82% { background: rgba(255, 255, 255, 0.04); }
+}
+
+@keyframes petalBurst {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg); opacity: 0; }
+  28% { opacity: 1; }
+  100% { transform: translate3d(80rpx, -160rpx, 0) rotate(120deg); opacity: 0; }
+}
+
+@keyframes energySweep {
+  0%, 100% { opacity: 0.24; transform: rotate(0deg); }
+  50% { opacity: 0.88; transform: rotate(16deg); }
+}
+
+@keyframes ritualCardFlip {
+  0%, 100% { transform: rotateY(0deg) translate3d(0, 0, 0); }
+  50% { transform: rotateY(180deg) translate3d(0, -18rpx, 0); }
+}
+
+@keyframes textFade {
+  0%, 100% { opacity: 0.54; transform: translate3d(0, 6rpx, 0); }
+  50% { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+</style>

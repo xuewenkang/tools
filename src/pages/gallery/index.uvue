@@ -30,23 +30,8 @@ function safeText(value: any): string {
   return `${value}`.trim()
 }
 
-function pickGeminiText(data: any): string {
-  const outputText = safeText(data?.output_text)
-  if (outputText.length > 0) return outputText
-
-  const steps = data?.steps as any[]
-  if (steps == null) return ''
-  for (let i = 0; i < steps.length; i++) {
-    const step = steps[i]
-    if (step?.type != 'model_output') continue
-    const content = step?.content as any[]
-    if (content == null) continue
-    for (let j = 0; j < content.length; j++) {
-      const text = safeText(content[j]?.text)
-      if (text.length > 0) return text
-    }
-  }
-  return ''
+function pickSiliconFlowText(data: any): string {
+  return safeText(data?.choices?.[0]?.message?.content)
 }
 
 export default {
@@ -58,15 +43,23 @@ export default {
       mood: moods[0],
       encouragement: fallbackLines[0],
       story: '',
+      storyExpanded: false,
       isGeneratingLine: false,
       isGeneratingStory: false,
       storyTipVisible: false,
+      weatherCity: '当前位置',
+      weatherMetaLabel: '每日氛围',
+      weatherTemp: '--',
+      weatherHumidity: '--',
+      weatherWind: '--',
+      weatherAirQuality: '氛围',
     }
   },
   onShow() {
     const sysInfo = uni.getSystemInfoSync()
     this.statusBarHeight = (sysInfo.statusBarHeight as number) ?? 44
     this.pickDailyMood()
+    this.loadRealWeather()
     this.loadDailyLine()
   },
   methods: {
@@ -76,8 +69,95 @@ export default {
       this.mood = moods[index]
       this.encouragement = fallbackLines[index]
     },
-    getGeminiKey(): string {
-      const key = uni.getStorageSync('geminiApiKey')
+    loadRealWeather(force: boolean = false) {
+      const cached = uni.getStorageSync('todayWeather') as any
+      const now = Date.now()
+      if (!force && cached != null && cached.time != null && now - cached.time < 30 * 60 * 1000) {
+        console.log('[weather] use cached weather')
+        this.applyWeather(cached.data)
+        return
+      }
+      this.weatherMetaLabel = '定位中'
+      uni.authorize({
+        scope: 'scope.userLocation',
+        success: () => {
+          this.requestLocationAndWeather()
+        },
+        fail: () => {
+          console.log('[weather] location authorize failed')
+          this.weatherMetaLabel = '未授权定位'
+        },
+      })
+    },
+    requestLocationAndWeather() {
+      uni.getLocation({
+        type: 'wgs84',
+        success: (loc) => {
+          const latitude = loc.latitude
+          const longitude = loc.longitude
+          console.log('[weather] location success', latitude, longitude)
+          this.fetchWeather(latitude, longitude)
+        },
+        fail: (err) => {
+          console.log('[weather] getLocation failed', err)
+          this.weatherMetaLabel = '非实时天气'
+        },
+      })
+    },
+    refreshWeather() {
+      uni.removeStorageSync('todayWeather')
+      this.loadRealWeather(true)
+    },
+    fetchWeather(latitude: number, longitude: number) {
+      console.log('[weather] fetch Open-Meteo')
+      uni.request({
+        url: `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&timezone=auto`,
+        method: 'GET',
+        success: (res) => {
+          console.log('[weather] Open-Meteo response', res.statusCode)
+          const data = res.data as any
+          if (res.statusCode != 200 || data?.current == null) {
+            this.weatherMetaLabel = '非实时天气'
+            return
+          }
+          uni.setStorageSync('todayWeather', { time: Date.now(), data: data.current })
+          this.applyWeather(data.current)
+        },
+        fail: (err) => {
+          console.log('[weather] Open-Meteo failed', err)
+          this.weatherMetaLabel = '非实时天气'
+        },
+      })
+    },
+    applyWeather(current: any) {
+      const temp = Math.round(Number(current?.temperature_2m))
+      const humidity = Math.round(Number(current?.relative_humidity_2m))
+      const wind = Math.round(Number(current?.wind_speed_10m))
+      const code = Math.round(Number(current?.weather_code))
+      if (!isNaN(temp)) this.weatherTemp = `${temp}°`
+      if (!isNaN(humidity)) this.weatherHumidity = `${humidity}%`
+      if (!isNaN(wind)) this.weatherWind = `${wind}km/h`
+      this.weatherMetaLabel = '实时天气'
+      this.weatherAirQuality = '实况'
+      this.mood = this.weatherMoodFromCode(code)
+    },
+    weatherMoodFromCode(code: number): WeatherMood {
+      if (code == 0 || code == 1) {
+        return { title: '晴光', desc: '阳光很好 适合把今天过得松弛一点', className: 'sunny' }
+      }
+      if (code == 2 || code == 3 || code == 45 || code == 48) {
+        return { title: '云柔', desc: '云层很轻 今天适合慢慢整理心情', className: 'cloudy' }
+      }
+      if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82) || (code >= 95 && code <= 99)) {
+        return { title: '微雨', desc: '把情绪放轻 给自己一点安静时间', className: 'rainy' }
+      }
+      if (code >= 71 && code <= 77) {
+        return { title: '云柔', desc: '天气清冷 适合喝点热的再开始', className: 'cloudy' }
+      }
+      return moods[0]
+    },
+    getSiliconFlowKey(): string {
+      const key = uni.getStorageSync('siliconFlowApiKey')
       return safeText(key)
     },
     loadDailyLine() {
@@ -87,16 +167,16 @@ export default {
         this.encouragement = cached
         return
       }
-      const key = this.getGeminiKey()
+      const key = this.getSiliconFlowKey()
       if (key.length == 0) return
       this.generateEncouragement(key, cachedKey)
     },
     generateEncouragement(key: string, cachedKey: string) {
       if (this.isGeneratingLine) return
       this.isGeneratingLine = true
-      this.callGemini(
+      this.callSiliconFlow(
         key,
-        `今天是 ${this.dayKey}。请给出一句适合今天阅读的中文名人名言，包含作者。要求温柔、有力量、适合日常自我鼓励。不要超过32个字，不要使用表情符号。`,
+        `请输出一句真实中文名人名言，附作者。适合日常自我鼓励。只输出一句，不要解释，不超过32个字。`,
         (text: string) => {
           this.isGeneratingLine = false
           if (text.length > 0) {
@@ -107,6 +187,8 @@ export default {
         () => {
           this.isGeneratingLine = false
         },
+        80,
+        0.3,
       )
     },
     generateStory() {
@@ -119,22 +201,24 @@ export default {
       const cached = safeText(uni.getStorageSync(cachedKey))
       if (cached.length > 0) {
         this.story = cached
+        this.storyExpanded = false
         this.showDailyStoryTip()
         return
       }
-      const key = this.getGeminiKey()
+      const key = this.getSiliconFlowKey()
       if (key.length == 0) {
-        uni.showToast({ title: '请先在设置中填写 Gemini Key', icon: 'none' })
+        uni.showToast({ title: '请先在设置中填写硅基流动 Key', icon: 'none' })
         return
       }
       this.isGeneratingStory = true
-      this.callGemini(
+      this.callSiliconFlow(
         key,
         `请为 ${this.dayKey} 写一个今日小故事。风格温柔、励志、有画面感，主角是一个普通但认真生活的人。控制在120字以内，不要标题，不要表情符号。`,
         (text: string) => {
           this.isGeneratingStory = false
           if (text.length > 0) {
             this.story = text
+            this.storyExpanded = false
             uni.setStorageSync(cachedKey, text)
           }
         },
@@ -150,33 +234,46 @@ export default {
         this.storyTipVisible = false
       }, 2200)
     },
-    callGemini(key: string, prompt: string, successCb: (text: string) => void, failCb: () => void) {
+    toggleStoryExpanded() {
+      this.storyExpanded = !this.storyExpanded
+    },
+    callSiliconFlow(key: string, prompt: string, successCb: (text: string) => void, failCb: () => void, maxTokens: number = 256, temperature: number = 0.7) {
       uni.request({
-        url: 'https://generativelanguage.googleapis.com/v1beta/interactions',
+        url: 'https://api.siliconflow.cn/v1/chat/completions',
         method: 'POST',
+        timeout: 30000,
         header: {
           'Content-Type': 'application/json',
-          'x-goog-api-key': key,
+          'Authorization': `Bearer ${key}`,
         },
         data: {
-          model: 'gemini-3.1-flash-lite',
-          input: prompt,
+          model: 'deepseek-ai/DeepSeek-V4-Pro',
+          messages: [
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+          temperature,
+          max_tokens: maxTokens,
         },
         success: (res) => {
+          console.log('[ai] SiliconFlow response', res.statusCode)
           const data = res.data as any
           if (res.statusCode == 429) {
             uni.showToast({ title: '今日免费额度暂不可用', icon: 'none' })
             failCb()
             return
           }
-          const text = pickGeminiText(data)
+          const text = pickSiliconFlowText(data)
           if (text.length == 0) {
             failCb()
             return
           }
           successCb(text)
         },
-        fail: () => {
+        fail: (err) => {
+          console.log('[ai] SiliconFlow failed', err)
           failCb()
         },
       })
@@ -195,7 +292,7 @@ export default {
     </view>
 
     <scroll-view scroll-y class="main-scroll" :style="{ marginTop: navOffset + 'px' }">
-      <view class="weather-card page-card card-delay-1" :class="mood.className">
+      <view class="weather-card page-card card-delay-1" :class="mood.className" @click="refreshWeather">
         <view class="weather-scene">
           <view class="glow glow-main"></view>
           <view class="glow glow-soft"></view>
@@ -234,8 +331,8 @@ export default {
         <view class="weather-copy">
           <view class="weather-meta">
             <text>{{ dayKey }}</text>
-            <text>今日氛围</text>
-            <text>非实时天气</text>
+            <text>{{ weatherMetaLabel }}</text>
+            <text>{{ weatherCity }}</text>
           </view>
           <view class="weather-bottom">
             <view class="weather-text">
@@ -246,29 +343,29 @@ export default {
               <view class="weather-pill">
                 <view class="line-icon thermometer"></view>
                 <view>
-                  <text class="pill-value">26°</text>
+                  <text class="pill-value">{{ weatherTemp }}</text>
                   <text class="pill-label">温度</text>
                 </view>
               </view>
               <view class="weather-pill">
                 <view class="line-icon drop"></view>
                 <view>
-                  <text class="pill-value">65%</text>
+                  <text class="pill-value">{{ weatherHumidity }}</text>
                   <text class="pill-label">湿度</text>
                 </view>
               </view>
               <view class="weather-pill">
                 <view class="line-icon wind"></view>
                 <view>
-                  <text class="pill-value">2级</text>
-                  <text class="pill-label">东南风</text>
+                  <text class="pill-value">{{ weatherWind }}</text>
+                  <text class="pill-label">风速</text>
                 </view>
               </view>
               <view class="weather-pill">
                 <view class="line-icon leaf-icon"></view>
                 <view>
-                  <text class="pill-value">优</text>
-                  <text class="pill-label">空气</text>
+                  <text class="pill-value">{{ weatherAirQuality }}</text>
+                  <text class="pill-label">来源</text>
                 </view>
               </view>
             </view>
@@ -295,7 +392,7 @@ export default {
               <view class="book-icon"></view>
               <text class="story-title">每日故事</text>
             </view>
-            <text class="story-subtitle">Gemini 今日生成</text>
+            <text class="story-subtitle">DeepSeek 今日生成</text>
           </view>
           <button class="story-button" @click="generateStory">
             <view class="refresh-icon" :class="{ turning: isGeneratingStory }"></view>
@@ -305,7 +402,7 @@ export default {
 
         <view v-if="storyTipVisible" class="daily-tip">
           <text class="daily-tip-title">今天就这一篇</text>
-          <text class="daily-tip-text">你当 Gemini 是皇上吗？今天就召见一次。（认真脸）</text>
+          <text class="daily-tip-text">你当 AI 是皇上吗？今天就召见一次。（认真脸）</text>
         </view>
 
         <view class="story-cover">
@@ -320,7 +417,10 @@ export default {
         </view>
 
         <view class="story-body">
-          <text class="story-text">{{ story.length > 0 ? story : '点击生成 让今天拥有一个小小的开场。' }}</text>
+          <text :class="{ 'story-text': true, expanded: storyExpanded }">{{ story.length > 0 ? story : '点击生成 让今天拥有一个小小的开场。' }}</text>
+          <button v-if="story.length > 80" class="story-expand" @click="toggleStoryExpanded">
+            {{ storyExpanded ? '收起' : '展开全文' }}
+          </button>
         </view>
       </view>
 
@@ -1200,6 +1300,9 @@ export default {
 
 .story-body {
   margin-top: 24rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .story-text {
@@ -1209,6 +1312,28 @@ export default {
   color: #555555;
   max-height: 342rpx;
   overflow: hidden;
+}
+
+.story-text.expanded {
+  max-height: none;
+}
+
+.story-expand {
+  height: 58rpx;
+  margin-top: 16rpx;
+  padding: 0 24rpx;
+  border-radius: 999rpx;
+  background: #fff0ef;
+  color: #b85265;
+  font-size: 24rpx;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.story-expand:active {
+  transform: scale(0.96);
 }
 
 .bottom-safe {
@@ -1313,4 +1438,5 @@ export default {
   0% { opacity: 0; transform: translateY(-10rpx) scale(0.98); }
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
+
 </style>

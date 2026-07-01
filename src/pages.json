@@ -17,6 +17,14 @@
             }
         },
         {
+            "path": "pages/starcard/index",
+            "style": {
+                "navigationBarTitleText": "",
+                "navigationStyle": "custom",
+                "backgroundColor": "#060817"
+            }
+        },
+        {
             "path": "pages/settings/index",
             "style": {
                 "navigationBarTitleText": "",
@@ -51,6 +59,12 @@
                 "text": "灵感",
                 "iconPath": "static/tabbar/gallery.png",
                 "selectedIconPath": "static/tabbar/gallery-active.png"
+            },
+            {
+                "pagePath": "pages/starcard/index",
+                "text": "星卡",
+                "iconPath": "static/tabbar/tools.png",
+                "selectedIconPath": "static/tabbar/tools-active.png"
             },
             {
                 "pagePath": "pages/settings/index",
